@@ -8,11 +8,15 @@ const cookieParser = require('cookie-parser');
 const PDFDocument = require('pdfkit');
 const { Resend } = require('resend');
 const cron = require('node-cron');
+const Stripe = require('stripe');
 const { pool, init } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.SESSION_SECRET || 'chainguard-jwt-secret';
+const stripe = process.env.STRIPE_SECRET_KEY ? Stripe(process.env.STRIPE_SECRET_KEY) : null;
+const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 
 // ── Middleware ──────────────────────────────────────────────
 app.use(express.json());
@@ -527,6 +531,269 @@ cron.schedule('0 6 * * *', async () => {
     console.error('[CRON] Kritisk fejl:', e.message);
   }
 }, { timezone: 'Europe/Copenhagen' });
+
+// ── Stripe webhook (raw body påkrævet) ──────────────────────
+app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  let event;
+  try {
+    if (STRIPE_WEBHOOK_SECRET) {
+      event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
+    } else {
+      event = JSON.parse(req.body);
+    }
+  } catch (e) {
+    return res.status(400).send('Webhook fejl: ' + e.message);
+  }
+
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const userId = session.metadata?.user_id;
+    const plan = session.metadata?.plan;
+    if (userId) {
+      await pool.query(
+        `UPDATE users SET stripe_customer_id=$1, stripe_subscription_id=$2, subscription_plan=$3, subscription_status='active' WHERE id=$4`,
+        [session.customer, session.subscription, plan, userId]
+      ).catch(e => console.error('Webhook DB fejl:', e.message));
+    }
+  }
+
+  if (event.type === 'customer.subscription.deleted') {
+    const sub = event.data.object;
+    await pool.query(
+      `UPDATE users SET subscription_status='cancelled' WHERE stripe_subscription_id=$1`,
+      [sub.id]
+    ).catch(e => console.error('Webhook DB fejl:', e.message));
+  }
+
+  res.json({ received: true });
+});
+
+// ── Stripe: opret checkout session ──────────────────────────
+app.post('/api/stripe/checkout', requireAuth, async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Stripe ikke konfigureret' });
+  const { plan } = req.body;
+  const plans = {
+    basis: { name: 'ChainGuard Basis', amount: 99900, description: '0–20 mio kr omsætning · Fuld compliance platform' },
+    pro:   { name: 'ChainGuard Pro',   amount: 249900, description: '20–100 mio kr omsætning · Avanceret compliance + prioriteret support' },
+  };
+  const selected = plans[plan];
+  if (!selected) return res.status(400).json({ error: 'Ukendt plan' });
+
+  const host = req.headers.origin || `https://${req.headers.host}`;
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'dkk',
+          product_data: { name: selected.name, description: selected.description },
+          unit_amount: selected.amount,
+          recurring: { interval: 'month' },
+        },
+        quantity: 1,
+      }],
+      subscription_data: {
+        trial_period_days: 30,
+        metadata: { user_id: String(req.user.id), plan },
+      },
+      metadata: { user_id: String(req.user.id), plan },
+      customer_email: req.user.email,
+      success_url: `${host}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${host}/pricing`,
+    });
+    res.json({ url: session.url });
+  } catch (e) {
+    console.error('Stripe checkout fejl:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Stripe: success side ─────────────────────────────────────
+app.get('/payment/success', requireAuth, async (req, res) => {
+  const { session_id } = req.query;
+  let plan = 'basis';
+  try {
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+    plan = session.metadata?.plan || 'basis';
+    await pool.query(
+      `UPDATE users SET stripe_customer_id=$1, stripe_subscription_id=$2, subscription_plan=$3, subscription_status='trialing' WHERE id=$4`,
+      [session.customer, session.subscription, plan, req.user.id]
+    );
+  } catch (e) { console.error('Success session fejl:', e.message); }
+
+  const planLabel = plan === 'pro' ? 'Pro' : 'Basis';
+  res.send(`<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChainGuard — Betaling gennemført</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#080C20;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:20px;padding:56px 48px;max-width:480px;width:100%;text-align:center}
+.icon{width:64px;height:64px;background:rgba(0,223,160,0.15);border:1px solid rgba(0,223,160,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;font-size:28px}
+h1{font-size:24px;font-weight:800;margin-bottom:10px}
+p{color:rgba(255,255,255,0.5);font-size:14px;line-height:1.6;margin-bottom:28px}
+a{display:inline-block;background:linear-gradient(135deg,#7C5CFC,#635BFF);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:14px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">✓</div>
+  <h1>Betaling gennemført!</h1>
+  <p>Velkommen til ChainGuard ${planLabel}.<br>Din første måned er gratis — herefter faktureres ${plan === 'pro' ? '2.499' : '999'} kr/md automatisk.</p>
+  <a href="/">Gå til platformen</a>
+</div>
+</body>
+</html>`);
+});
+
+// ── Prisside (offentlig) ─────────────────────────────────────
+app.get('/pricing', (req, res) => {
+  const user = getUser(req);
+  res.send(`<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChainGuard — Priser</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#080C20;color:#fff;min-height:100vh;-webkit-font-smoothing:antialiased}
+.orb-layer{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+.orb{position:absolute;border-radius:50%}
+.orb-1{width:700px;height:500px;background:radial-gradient(ellipse,rgba(124,92,252,0.28) 0%,transparent 65%);top:-150px;left:-150px}
+.orb-2{width:500px;height:500px;background:radial-gradient(ellipse,rgba(99,91,255,0.18) 0%,transparent 70%);bottom:-100px;right:-100px}
+nav{display:flex;align-items:center;justify-content:space-between;padding:20px 48px;border-bottom:1px solid rgba(255,255,255,0.07);position:sticky;top:0;background:rgba(8,12,32,0.85);backdrop-filter:blur(20px);z-index:10}
+.brand{display:flex;align-items:center;gap:12px}
+.brand-icon{width:36px;height:36px;background:linear-gradient(140deg,#9270FF,#635BFF);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.brand-name{font-size:16px;font-weight:800}
+.nav-links{display:flex;gap:16px;align-items:center}
+.nav-link{color:rgba(255,255,255,0.5);text-decoration:none;font-size:13.5px;font-weight:500;transition:color 0.15s}
+.nav-link:hover{color:#fff}
+.btn-nav{background:linear-gradient(135deg,#7C5CFC,#635BFF);color:#fff;text-decoration:none;padding:9px 20px;border-radius:8px;font-size:13px;font-weight:700;transition:opacity 0.15s}
+.btn-nav:hover{opacity:0.88}
+.hero{text-align:center;padding:72px 24px 56px;position:relative;z-index:1}
+.badge{display:inline-block;background:rgba(124,92,252,0.15);border:1px solid rgba(124,92,252,0.3);color:#A78BFA;font-size:12px;font-weight:700;padding:5px 14px;border-radius:99px;margin-bottom:20px}
+h1{font-size:42px;font-weight:800;letter-spacing:-1.5px;margin-bottom:14px;line-height:1.1}
+.sub{color:rgba(255,255,255,0.45);font-size:16px;max-width:520px;margin:0 auto 12px}
+.trial-note{color:#00DFA0;font-size:13.5px;font-weight:600;margin-top:8px}
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:980px;margin:0 auto;padding:0 24px 80px;position:relative;z-index:1}
+.plan{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:20px;padding:36px 32px;position:relative;transition:border-color 0.2s}
+.plan.popular{border-color:rgba(124,92,252,0.5);background:rgba(124,92,252,0.06)}
+.popular-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#7C5CFC,#635BFF);color:#fff;font-size:11px;font-weight:800;padding:4px 16px;border-radius:99px;white-space:nowrap}
+.plan-name{font-size:13px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+.plan-price{font-size:40px;font-weight:800;letter-spacing:-1.5px;margin-bottom:4px}
+.plan-price span{font-size:16px;font-weight:500;color:rgba(255,255,255,0.4)}
+.plan-target{font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:24px;padding-bottom:24px;border-bottom:1px solid rgba(255,255,255,0.07)}
+.plan-features{list-style:none;margin-bottom:28px}
+.plan-features li{font-size:13.5px;color:rgba(255,255,255,0.7);padding:7px 0;display:flex;align-items:center;gap:10px}
+.plan-features li::before{content:'✓';color:#00DFA0;font-weight:800;font-size:12px;flex-shrink:0}
+.btn-plan{width:100%;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);color:#fff;padding:14px;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;transition:all 0.2s}
+.btn-plan:hover{background:rgba(255,255,255,0.12)}
+.btn-plan.primary{background:linear-gradient(135deg,#7C5CFC,#635BFF);border:none;box-shadow:0 4px 20px rgba(124,92,252,0.4)}
+.btn-plan.primary:hover{opacity:0.88}
+.loading{opacity:0.6;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="orb-layer"><div class="orb orb-1"></div><div class="orb orb-2"></div></div>
+<nav>
+  <div class="brand">
+    <div class="brand-icon">🛡</div>
+    <div class="brand-name">ChainGuard</div>
+  </div>
+  <div class="nav-links">
+    ${user ? '<a href="/" class="nav-link">Platform</a>' : ''}
+    <a href="/login" class="btn-nav">${user ? 'Mit dashboard' : 'Log ind'}</a>
+  </div>
+</nav>
+<div class="hero">
+  <div class="badge">Simpel og transparent prissætning</div>
+  <h1>Vælg den plan<br>der passer dig</h1>
+  <p class="sub">Alt hvad du behøver for at dokumentere kædeansvar og overholde EU-krav</p>
+  <div class="trial-note">Første 30 dage gratis — ingen binding</div>
+</div>
+<div class="plans">
+  <div class="plan">
+    <div class="plan-name">Basis</div>
+    <div class="plan-price">999 <span>kr/md</span></div>
+    <div class="plan-target">Virksomheder med 0–20 mio kr omsætning</div>
+    <ul class="plan-features">
+      <li>CVR-opslag og leverandørregistrering</li>
+      <li>Automatisk revisionsspor</li>
+      <li>PDF compliance-rapport</li>
+      <li>Daglig email-arkivering</li>
+      <li>5-års dokumentopbevaring</li>
+      <li>Op til 50 leverandører</li>
+    </ul>
+    <button class="btn-plan" onclick="startCheckout('basis', this)">Start gratis prøveperiode</button>
+  </div>
+  <div class="plan popular">
+    <div class="popular-badge">Mest populær</div>
+    <div class="plan-name">Pro</div>
+    <div class="plan-price">2.499 <span>kr/md</span></div>
+    <div class="plan-target">Virksomheder med 20–100 mio kr omsætning</div>
+    <ul class="plan-features">
+      <li>Alt i Basis</li>
+      <li>Ubegrænsede leverandører</li>
+      <li>Avanceret risikovurdering</li>
+      <li>ESG due diligence rapporter</li>
+      <li>Prioriteret support</li>
+      <li>API-adgang</li>
+    </ul>
+    <button class="btn-plan primary" onclick="startCheckout('pro', this)">Start gratis prøveperiode</button>
+  </div>
+  <div class="plan">
+    <div class="plan-name">Heavy</div>
+    <div class="plan-price" style="font-size:28px;margin-top:6px">Kontakt os</div>
+    <div class="plan-target">Virksomheder med 100+ mio kr omsætning</div>
+    <ul class="plan-features">
+      <li>Alt i Pro</li>
+      <li>Skræddersyet onboarding</li>
+      <li>Dedicated account manager</li>
+      <li>SLA-garanti</li>
+      <li>On-premise mulighed</li>
+      <li>Tilpasset rapportering</li>
+    </ul>
+    <button class="btn-plan" onclick="window.location.href='mailto:christian@chainguard.ai?subject=Heavy plan forespørgsel'">Kontakt os</button>
+  </div>
+</div>
+<script>
+async function startCheckout(plan, btn) {
+  btn.classList.add('loading');
+  btn.textContent = 'Vent...';
+  try {
+    const r = await fetch('/api/stripe/checkout', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan })
+    });
+    const data = await r.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else if (r.status === 401) {
+      window.location.href = '/login?redirect=pricing';
+    } else {
+      alert('Fejl: ' + (data.error || 'Prøv igen'));
+      btn.classList.remove('loading');
+      btn.textContent = 'Start gratis prøveperiode';
+    }
+  } catch(e) {
+    alert('Netværksfejl — prøv igen');
+    btn.classList.remove('loading');
+    btn.textContent = 'Start gratis prøveperiode';
+  }
+}
+</script>
+</body>
+</html>`);
+});
 
 // ── Investor side ────────────────────────────────────────────
 app.get('/investor', requireAuth, (req, res) => {
