@@ -1145,14 +1145,53 @@ Aarhus Havnefront</div>
     <!-- ══════════════════════════════════
          PAGE: DASHBOARD
     ══════════════════════════════════ -->
-    <div class=”page-view active” id=”page-dashboard”>
-
-      <!-- KPI række med real data -->
-      <div class=”kpi-row”>
-        <div class=”kpi”><div class=”kpi-val” id=”kpi-total”>—</div><div class=”kpi-label”>Leverandører i alt</div></div>
-        <div class=”kpi”><div class=”kpi-val” style=”color:var(--green)” id=”kpi-compliant”>—</div><div class=”kpi-label”>Godkendt</div></div>
-        <div class=”kpi”><div class=”kpi-val” style=”color:var(--amber)” id=”kpi-pending”>—</div><div class=”kpi-label”>Afventer</div></div>
-        <div class=”kpi”><div class=”kpi-val” style=”color:var(--red)” id=”kpi-noncompliant”>—</div><div class=”kpi-label”>Ikke godkendt</div></div>
+    <div class="page-view active" id="page-dashboard">
+      <div class="welcome-hero">
+        <div class="hero-copy">
+          <div class="hero-kicker">Nem start</div>
+          <div class="hero-title">Se hurtigt hvad der er fint, hvad der mangler, og hvad du skal gøre nu</div>
+          <div class="hero-desc">Denne side er lavet til at kunne læses på få sekunder. Grøn betyder “alt ser godt ud”. Gul betyder “kig på det snart”. Rød betyder “det skal løses nu”. Klik på et firma for at se detaljer i et enkelt sprog.</div>
+          <div class="hero-badges">
+            <span class="chip chip-green">Grøn = ok</span>
+            <span class="chip chip-amber">Gul = kig snart</span>
+            <span class="chip chip-red">Rød = gør noget nu</span>
+          </div>
+        </div>
+        <div class="hero-steps">
+          <div class="hero-step">
+            <div class="hero-step-num">1</div>
+            <div>
+              <div class="hero-step-title">Start med de røde tal</div>
+              <div class="hero-step-text">De viser det, der kan stoppe arbejdet eller kræver hurtig opfølgning.</div>
+            </div>
+          </div>
+          <div class="hero-step">
+            <div class="hero-step-num">2</div>
+            <div>
+              <div class="hero-step-title">Åbn firmaet og læs forklaringen</div>
+              <div class="hero-step-text">Drawer’en viser hvad systemet ved, hvad der mangler, og hvor data kommer fra.</div>
+            </div>
+          </div>
+          <div class="hero-step">
+            <div class="hero-step-num">3</div>
+            <div>
+              <div class="hero-step-title">Send påmindelse eller bestil dokument</div>
+              <div class="hero-step-text">De vigtigste handlinger ligger direkte på siden, så man ikke skal lede.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="helper-strip">
+        <div class="helper-pill"><span class="helper-dot" style="background:var(--green)"></span>Du kan trygt ignorere grønne ting indtil videre</div>
+        <div class="helper-pill"><span class="helper-dot" style="background:var(--amber)"></span>Gule ting er på vej til at blive et problem</div>
+        <div class="helper-pill"><span class="helper-dot" style="background:var(--red)"></span>Røde ting kræver opfølgning nu</div>
+      </div>
+      <div class="kpi-row">
+        <div class="kpi"><div class="kpi-val">47</div><div class="kpi-label">Firmaer i systemet</div><div class="kpi-sub"><span class="pos">+3</span> nye siden sidste uge</div></div>
+        <div class="kpi" style="cursor:default"><div class="kpi-val red">6</div><div class="kpi-label">Skal kigges på nu</div><div class="kpi-sub">Røde sager med høj risiko</div><button class="remind-kpi-btn remind-kpi-btn--red" onclick="openReminderModal('highrisk')"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 16a2 2 0 001.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 008 16zm.25-14.75V.75a.75.75 0 00-1.5 0v.5C4.23 1.685 2 4.042 2 7v4.5l-1.293 1.293A1 1 0 001.414 14.5H14.586a1 1 0 00.707-1.707L14 11.5V7c0-2.958-2.23-5.315-5.75-5.75z"/></svg>Send påmindelser</button></div>
+        <div class="kpi" style="cursor:default"><div class="kpi-val amber">23</div><div class="kpi-label">Mangler papirer</div><div class="kpi-sub">Kan følges op med ét klik</div><button class="remind-kpi-btn" onclick="openReminderModal()"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 16a2 2 0 001.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 008 16zm.25-14.75V.75a.75.75 0 00-1.5 0v.5C4.23 1.685 2 4.042 2 7v4.5l-1.293 1.293A1 1 0 001.414 14.5H14.586a1 1 0 00.707-1.707L14 11.5V7c0-2.958-2.23-5.315-5.75-5.75z"/></svg>Send påmindelser</button></div>
+        <div class="kpi" style="cursor:default"><div class="kpi-val amber">12</div><div class="kpi-label">Skal snart fornyes</div><div class="kpi-sub">Forsikringer og certifikater</div><button class="remind-kpi-btn" onclick="openReminderModal('expiring')"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 16a2 2 0 001.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 008 16zm.25-14.75V.75a.75.75 0 00-1.5 0v.5C4.23 1.685 2 4.042 2 7v4.5l-1.293 1.293A1 1 0 001.414 14.5H14.586a1 1 0 00.707-1.707L14 11.5V7c0-2.958-2.23-5.315-5.75-5.75z"/></svg>Send påmindelser</button></div>
+        <div class="kpi"><div class="kpi-val">7</div><div class="kpi-label">Åbne sager</div><div class="kpi-sub">Noget er allerede i gang</div></div>
       </div>
 
       <!-- Virk CVR Search -->
@@ -1221,17 +1260,102 @@ Aarhus Havnefront</div>
         </div>
       </div>
 
-      <!-- Leverandørliste fra database -->
+      <!-- Main panel -->
       <div class="panel" id="main-panel">
-        <div class="panel-header">
-          <div class="panel-title-group">
-            <span class="panel-title">Dine leverandører</span>
-            <span class="panel-badge pb-neutral" id="db-supplier-count">Indlæser...</span>
+        <div class="panel-header" onclick="togglePanel('main-panel')">
+            <div class="panel-title-group">
+            <span class="panel-title">Hvem skal du kigge på nu?</span>
+            <div class="panel-badges">
+              <span class="panel-badge pb-neutral">47 firmaer</span>
+              <span class="panel-badge pb-red">5 ting kræver handling</span>
+            </div>
+          </div>
+          <div class="panel-right">
+            <span class="panel-action" onclick="event.stopPropagation();navigateTo('suppliers')">Se alle →</span>
+            <div class="panel-toggle">
+              <svg class="panel-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            </div>
           </div>
         </div>
+        <div class="panel-tabs">
+          <div class="panel-tab active" onclick="switchTab('suppliers',this)">Firmaer <span class="tab-count">6</span></div>
+          <div class="panel-tab" onclick="switchTab('alerts',this)">Kræver handling <span class="tab-count">5</span></div>
+        </div>
         <div class="panel-body">
-          <div id="db-supplier-list" style="padding:8px 0">
-            <div style="padding:24px;text-align:center;color:var(--text-30);font-size:13px">Indlæser...</div>
+          <div class="tab-pane active" id="tab-suppliers">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Firma</th><th>Arbejdstype</th><th>Risiko</th><th>Score</th><th>Status</th></tr></thead>
+                <tbody id="dashboard-supplier-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="tab-pane" id="tab-alerts">
+            <div class="alert-list">
+              <div class="alert-item"><div class="alert-bar" style="background:var(--red)"></div><div class="alert-body"><div class="alert-title">Baltic Build: Arbejdstilladelse mangler</div><div class="alert-desc">4 ansatte ikke dokumenteret</div></div><div class="alert-time">I dag</div></div>
+              <div class="alert-item"><div class="alert-bar" style="background:var(--amber)"></div><div class="alert-body"><div class="alert-title">CleanPro: Forsikring udløber om 8 dage</div><div class="alert-desc">Arbejdsskade · DKK 10M dækning</div></div><div class="alert-time">8 dage</div></div>
+              <div class="alert-item"><div class="alert-bar" style="background:var(--amber)"></div><div class="alert-body"><div class="alert-title">Vargas: ESG-skema ikke returneret</div><div class="alert-desc">Påmindelse #3 sendt · Ingen svar</div></div><div class="alert-time">12 dage</div></div>
+              <div class="alert-item"><div class="alert-bar" style="background:var(--red)"></div><div class="alert-body"><div class="alert-title">Afvigelse åben: Sikkerhedsudstyr mangler</div><div class="alert-desc">Blok C · Ansvarlig: T. Madsen</div></div><div class="alert-time">3 dage</div></div>
+              <div class="alert-item"><div class="alert-bar" style="background:var(--blue)"></div><div class="alert-body"><div class="alert-title">Ny leverandør anmodet om godkendelse</div><div class="alert-desc">EastBuild Sp. z o.o. · Polen</div></div><div class="alert-time">I dag</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="grid-template-columns:1fr">
+        <!-- Dokumentindsamling -->
+        <div class="panel" id="panel-docs" style="margin-bottom:0">
+          <div class="panel-header" onclick="togglePanel('panel-docs')">
+            <div class="panel-title-group"><span class="panel-title">Hvilke papirer mangler vi?</span><span class="panel-badge pb-neutral">6 typer</span></div>
+            <div class="panel-right">
+              <span class="panel-action" onclick="event.stopPropagation();navigateTo('docbank')">Se alle →</span>
+              <div class="panel-toggle"><svg class="panel-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="doc-list">
+              <div class="doc-item"><div class="doc-info"><div class="doc-label">Kontrakter</div><div class="doc-sub">43 af 47 modtaget</div></div><div class="doc-progress"><div class="doc-progress-top"><div class="doc-pct" style="color:var(--green)">91%</div></div><div class="doc-track"><div class="doc-fill" style="width:91%;background:var(--green)"></div></div></div></div>
+              <div class="doc-item"><div class="doc-info"><div class="doc-label">Forsikringer</div><div class="doc-sub">35 af 47 modtaget</div></div><div class="doc-progress"><div class="doc-progress-top"><div class="doc-pct" style="color:var(--amber)">74%</div></div><div class="doc-track"><div class="doc-fill" style="width:74%;background:var(--amber)"></div></div></div></div>
+              <div class="doc-item"><div class="doc-info"><div class="doc-label">Arbejdstilladelser</div><div class="doc-sub">27 af 47 modtaget</div></div><div class="doc-progress"><div class="doc-progress-top"><div class="doc-pct" style="color:var(--amber)">58%</div></div><div class="doc-track"><div class="doc-fill" style="width:58%;background:var(--amber)"></div></div></div></div>
+              <div class="doc-item"><div class="doc-info"><div class="doc-label">Sikkerhedsdokumentation</div><div class="doc-sub">39 af 47 modtaget</div></div><div class="doc-progress"><div class="doc-progress-top"><div class="doc-pct" style="color:var(--green)">83%</div></div><div class="doc-track"><div class="doc-fill" style="width:83%;background:var(--green)"></div></div></div></div>
+              <div class="doc-item"><div class="doc-info"><div class="doc-label">ESG-spørgeskemaer</div><div class="doc-sub">19 af 47 modtaget</div></div><div class="doc-progress"><div class="doc-progress-top"><div class="doc-pct" style="color:var(--red)">40%</div></div><div class="doc-track"><div class="doc-fill" style="width:40%;background:var(--red)"></div></div></div></div>
+              <div class="doc-item"><div class="doc-info"><div class="doc-label">Løndokumentation</div><div class="doc-sub">31 af 47 modtaget</div></div><div class="doc-progress"><div class="doc-progress-top"><div class="doc-pct" style="color:var(--amber)">66%</div></div><div class="doc-track"><div class="doc-fill" style="width:66%;background:var(--amber)"></div></div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Risikoprofil -->
+        <div class="panel" id="panel-risk" style="margin-bottom:0">
+          <div class="panel-header" onclick="togglePanel('panel-risk')">
+            <div class="panel-title-group"><span class="panel-title">Hvor er risikoen størst?</span><span class="panel-badge pb-red">6 skal kigges på</span></div>
+            <div class="panel-right">
+              <span class="panel-action" onclick="event.stopPropagation();navigateTo('risk')">Åbn liste →</span>
+              <div class="panel-toggle"><svg class="panel-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="risk-body">
+              <div class="donut-wrap">
+                <svg width="108" height="108" viewBox="0 0 108 108" style="flex-shrink:0">
+                  <circle cx="54" cy="54" r="42" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="13"/>
+                  <circle cx="54" cy="54" r="42" fill="none" stroke="#00DFA0" stroke-width="13" stroke-dasharray="263.9 263.9" stroke-dashoffset="50.1" stroke-linecap="round" transform="rotate(-90 54 54)"/>
+                  <circle cx="54" cy="54" r="42" fill="none" stroke="#FFAD0D" stroke-width="13" stroke-dasharray="263.9 263.9" stroke-dashoffset="247.7" stroke-linecap="round" transform="rotate(204 54 54)"/>
+                  <circle cx="54" cy="54" r="42" fill="none" stroke="#FF4D6A" stroke-width="13" stroke-dasharray="263.9 263.9" stroke-dashoffset="229.7" stroke-linecap="round" transform="rotate(228 54 54)"/>
+                  <text x="54" y="50" text-anchor="middle" font-family="Plus Jakarta Sans,sans-serif" font-size="20" font-weight="800" fill="#FFFFFF">47</text>
+                  <text x="54" y="63" text-anchor="middle" font-family="Plus Jakarta Sans,sans-serif" font-size="8" font-weight="700" fill="rgba(255,255,255,0.25)" letter-spacing="1.2">TOTAL</text>
+                </svg>
+                <div class="legend">
+                  <div class="legend-row"><div class="legend-dot" style="background:var(--green)"></div>Lav risiko<div class="legend-n">38</div></div>
+                  <div class="legend-row"><div class="legend-dot" style="background:var(--amber)"></div>Medium risiko<div class="legend-n">3</div></div>
+                  <div class="legend-row"><div class="legend-dot" style="background:var(--red)"></div>Høj risiko<div class="legend-n">6</div></div>
+                </div>
+              </div>
+              <div class="factors-label">Top risikofaktorer</div>
+              <div class="factor-row"><div class="factor-name">Manglende dokumenter</div><div class="factor-track"><div class="factor-fill" style="width:72%;background:var(--red)"></div></div><span class="chip chip-red" style="font-size:11px;padding:2px 8px">Høj</span></div>
+              <div class="factor-row"><div class="factor-name">Udenlandsk arbejdskraft</div><div class="factor-track"><div class="factor-fill" style="width:54%;background:var(--amber)"></div></div><span class="chip chip-amber" style="font-size:11px;padding:2px 8px">Medium</span></div>
+              <div class="factor-row"><div class="factor-name">Videre underentreprise</div><div class="factor-track"><div class="factor-fill" style="width:38%;background:var(--amber)"></div></div><span class="chip chip-amber" style="font-size:11px;padding:2px 8px">Medium</span></div>
+              <div class="factor-row"><div class="factor-name">ESG-data mangler</div><div class="factor-track"><div class="factor-fill" style="width:28%;background:rgba(255,255,255,0.18)"></div></div><span class="chip chip-gray" style="font-size:11px;padding:2px 8px">Lav</span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1931,41 +2055,6 @@ document.getElementById('all-suppliers-tbody').innerHTML     = SUPPLIERS.map(s =
 
 // Load gemte leverandører fra databasen
 fetch('/api/suppliers').then(r => r.json()).then(rows => {
-  // Opdater KPI-række med real data
-  const total = rows.length;
-  const compliant = rows.filter(r => r.status === 'compliant').length;
-  const pending = rows.filter(r => r.status === 'pending').length;
-  const noncompliant = rows.filter(r => r.status === 'non-compliant').length;
-  document.getElementById('kpi-total').textContent = total;
-  document.getElementById('kpi-compliant').textContent = compliant;
-  document.getElementById('kpi-pending').textContent = pending;
-  document.getElementById('kpi-noncompliant').textContent = noncompliant;
-  document.getElementById('db-supplier-count').textContent = total + ' firma' + (total !== 1 ? 'er' : '');
-
-  // Render leverandørliste
-  const list = document.getElementById('db-supplier-list');
-  if (!rows.length) {
-    list.innerHTML = `<div style="padding:40px 24px;text-align:center">
-      <div style="font-size:32px;margin-bottom:12px">🔍</div>
-      <div style="font-size:14px;font-weight:700;color:var(--text-80);margin-bottom:6px">Ingen leverandører endnu</div>
-      <div style="font-size:13px;color:var(--text-30)">Brug CVR-søgningen ovenfor til at tilføje din første leverandør</div>
-    </div>`;
-  } else {
-    list.innerHTML = rows.map(s => {
-      const statusLabel = s.status === 'compliant' ? 'Godkendt' : s.status === 'non-compliant' ? 'Ikke godkendt' : 'Afventer';
-      const statusClass = s.status === 'compliant' ? 'chip-green' : s.status === 'non-compliant' ? 'chip-red' : 'chip-amber';
-      const date = new Date(s.added_at).toLocaleDateString('da-DK');
-      return `<div style="display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--border)">
-        <div style="width:36px;height:36px;border-radius:10px;background:var(--violet-dim);border:1px solid rgba(124,92,252,0.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;font-weight:800;color:var(--violet-l)">${(s.name||'?')[0]}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13.5px;font-weight:700;color:var(--text-100)">${s.name}</div>
-          <div style="font-size:11.5px;color:var(--text-30);margin-top:2px">CVR ${s.cvr} · ${s.industry || '—'} · Tilføjet ${date}</div>
-        </div>
-        <span class="chip ${statusClass}">${statusLabel}</span>
-      </div>`;
-    }).join('');
-  }
-
   rows.forEach(row => {
     if(SUPPLIERS.find(s => s.cvr === row.cvr)) return; // undgå duplikater
     const risk = row.status === 'compliant' ? 'low' : row.status === 'non-compliant' ? 'high' : 'medium';
