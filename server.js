@@ -1,5 +1,6 @@
 const express = require('express');
 const session = require('express-session');
+const PgSession = require('connect-pg-simple')(session);
 const https = require('https');
 const path = require('path');
 const url = require('url');
@@ -13,6 +14,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
+  store: new PgSession({ pool, createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'chainguard-secret-skift-i-prod',
   resave: false,
   saveUninitialized: false,
