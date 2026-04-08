@@ -1087,11 +1087,14 @@ Aarhus Havnefront</div>
 
   <div class="sidebar-footer">
     <div class="user-row">
-      <div class="avatar">MK</div>
-      <div>
-        <div class="user-name">Morten Kjær</div>
-        <div class="user-role">Compliance Lead</div>
+      <div class="avatar">C</div>
+      <div style="flex:1">
+        <div class="user-name">Christian</div>
+        <div class="user-role">Admin</div>
       </div>
+      <a href="/logout" title="Log ud" style="color:rgba(255,255,255,0.3);display:flex;align-items:center;padding:4px;border-radius:6px;transition:color 0.15s;text-decoration:none" onmouseover="this.style.color='rgba(255,77,106,0.8)'" onmouseout="this.style.color='rgba(255,255,255,0.3)'">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </a>
     </div>
   </div>
 </aside>
@@ -2468,7 +2471,7 @@ async function fetchVirkByCvr(cvr) {
 async function fetchCvrapiByNumber(cvr) {
   const headers = {};
   if(virkApiUser && virkApiKey) headers['X-Virk-Auth'] = 'Basic ' + btoa(virkApiUser + ':' + virkApiKey);
-  const r = await fetch(`${PROXY_BASE}/api/cvr/${encodeURIComponent(cvr)}`, { headers });
+  const r = await fetch(`${PROXY_BASE}/api/cvr/${encodeURIComponent(cvr)}`, { headers, credentials: 'same-origin' });
   if(r.status === 404) throw new Error('NOT_FOUND');
   if(!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
@@ -2479,7 +2482,7 @@ async function fetchCvrapiByNumber(cvr) {
 async function fetchCvrapiByName(name) {
   const headers = {};
   if(virkApiUser && virkApiKey) headers['X-Virk-Auth'] = 'Basic ' + btoa(virkApiUser + ':' + virkApiKey);
-  const r = await fetch(`${PROXY_BASE}/api/cvr/search/${encodeURIComponent(name)}`, { headers });
+  const r = await fetch(`${PROXY_BASE}/api/cvr/search/${encodeURIComponent(name)}`, { headers, credentials: 'same-origin' });
   if(!r.ok) throw new Error(`HTTP ${r.status}`);
   const arr = await r.json();
   if(!arr.length) throw new Error('NOT_FOUND');
@@ -2950,6 +2953,7 @@ function finalizeOnboarding() {
   // Gem i database
   fetch('/api/suppliers', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       cvr: d.vat,
@@ -2961,6 +2965,8 @@ function finalizeOnboarding() {
       status: risk === 'low' ? 'compliant' : risk === 'medium' ? 'pending' : 'non-compliant',
       notes: obForm.note || ''
     })
+  }).then(r => {
+    if(!r.ok) console.error('Gem fejl:', r.status);
   }).catch(e => console.error('Kunne ikke gemme leverandør:', e));
 
   // Update all tables + counters
