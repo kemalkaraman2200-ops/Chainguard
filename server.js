@@ -158,6 +158,11 @@ function normalizeCVR(d) {
   };
 }
 
+app.get('/api/debug-db', async (req, res) => {
+  const url = process.env.DATABASE_URL || 'IKKE SAT';
+  res.json({ database_url_prefix: url.substring(0, 30) + '...' });
+});
+
 app.get('/api/test-cvr', async (req, res) => {
   try {
     const d = await httpsGet('https://cvrapi.dk/api?search=10150817&country=dk');
