@@ -220,7 +220,7 @@ app.get('/api/test-cvr', async (req, res) => {
   }
 });
 
-app.get('/api/cvr/:cvr', requireAuth, async (req, res) => {
+app.get('/api/cvr/:cvr', async (req, res) => {
   if (!/^\d{8}$/.test(req.params.cvr)) return res.status(400).json({ error: 'Ugyldigt CVR-nummer' });
   try {
     const d = await httpsGet('https://cvrapi.dk/api?search=' + req.params.cvr + '&country=dk');
@@ -231,7 +231,7 @@ app.get('/api/cvr/:cvr', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/cvr/search/:query', requireAuth, async (req, res) => {
+app.get('/api/cvr/search/:query', async (req, res) => {
   try {
     const q = decodeURIComponent(req.params.query);
     const d = await httpsGet('https://cvrapi.dk/api?search=' + encodeURIComponent(q) + '&country=dk');
