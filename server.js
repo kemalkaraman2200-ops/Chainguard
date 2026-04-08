@@ -205,6 +205,15 @@ function normalizeCVR(d) {
   };
 }
 
+app.get('/api/test-cvr', async (req, res) => {
+  try {
+    const d = await httpsGet('https://cvrapi.dk/api?search=10150817&country=dk');
+    res.json({ ok: true, name: d.name });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/cvr/:cvr', requireAuth, async (req, res) => {
   if (!/^\d{8}$/.test(req.params.cvr)) return res.status(400).json({ error: 'Ugyldigt CVR-nummer' });
   try {
