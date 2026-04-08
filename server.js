@@ -165,12 +165,14 @@ function normalizeCVR(d) {
 }
 
 app.get('/api/debug-db', async (req, res) => {
-  const dbUrl = process.env.DATABASE_URL || 'IKKE SAT';
-  const resendKey = process.env.RESEND_API_KEY || 'IKKE SAT';
+  const dbUrl = process.env.DATABASE_URL || '';
+  const resendKey = process.env.RESEND_API_KEY || '';
+  const stripeKey = process.env.STRIPE_SECRET_KEY || '';
   res.json({
-    database_url_prefix: dbUrl.substring(0, 30) + '...',
-    resend_key_prefix: resendKey.substring(0, 8) + '...',
-    resend_key_sat: !!process.env.RESEND_API_KEY
+    database_url_sat: !!dbUrl,
+    resend_key_sat: !!resendKey,
+    stripe_secret_sat: !!stripeKey,
+    stripe_secret_prefix: stripeKey ? stripeKey.substring(0, 12) + '...' : 'IKKE SAT',
   });
 });
 
