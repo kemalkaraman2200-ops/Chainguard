@@ -161,8 +161,13 @@ function normalizeCVR(d) {
 }
 
 app.get('/api/debug-db', async (req, res) => {
-  const url = process.env.DATABASE_URL || 'IKKE SAT';
-  res.json({ database_url_prefix: url.substring(0, 30) + '...' });
+  const dbUrl = process.env.DATABASE_URL || 'IKKE SAT';
+  const resendKey = process.env.RESEND_API_KEY || 'IKKE SAT';
+  res.json({
+    database_url_prefix: dbUrl.substring(0, 30) + '...',
+    resend_key_prefix: resendKey.substring(0, 8) + '...',
+    resend_key_sat: !!process.env.RESEND_API_KEY
+  });
 });
 
 app.get('/api/test-cvr', async (req, res) => {
