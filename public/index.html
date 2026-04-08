@@ -2020,6 +2020,33 @@ function renderSupplierRow(s, showCountry=false) {
 document.getElementById('dashboard-supplier-tbody').innerHTML = SUPPLIERS.map(s => renderSupplierRow(s)).join('');
 document.getElementById('all-suppliers-tbody').innerHTML     = SUPPLIERS.map(s => renderSupplierRow(s,true)).join('');
 
+// Load gemte leverandører fra databasen
+fetch('/api/suppliers').then(r => r.json()).then(rows => {
+  rows.forEach(row => {
+    if(SUPPLIERS.find(s => s.cvr === row.cvr)) return; // undgå duplikater
+    const risk = row.status === 'compliant' ? 'low' : row.status === 'non-compliant' ? 'high' : 'medium';
+    SUPPLIERS.push({
+      id: row.id,
+      name: row.name,
+      meta: `🇩🇰 Danmark · CVR ${row.cvr}`,
+      type: row.industry || 'Andet',
+      country: 'Danmark',
+      risk, riskLabel: {low:'Lav',medium:'Medium',high:'Høj'}[risk],
+      riskClass: {low:'chip-green',medium:'chip-amber',high:'chip-red'}[risk],
+      score: {low:80,medium:55,high:28}[risk],
+      scoreColor: {low:'var(--green)',medium:'var(--amber)',high:'var(--red)'}[risk],
+      status: row.status === 'compliant' ? 'Godkendt' : row.status === 'non-compliant' ? 'Blokeret' : 'Afventer',
+      statusClass: {low:'s-green',medium:'s-amber',high:'s-red'}[risk],
+      cvr: row.cvr,
+      address: row.address,
+      employees: row.employees ? String(row.employees) : '—',
+      since: '—', contact: '—', docs: [], log: [], monitoring: []
+    });
+  });
+  document.getElementById('dashboard-supplier-tbody').innerHTML = SUPPLIERS.map(s => renderSupplierRow(s)).join('');
+  document.getElementById('all-suppliers-tbody').innerHTML = SUPPLIERS.map(s => renderSupplierRow(s,true)).join('');
+}).catch(e => console.error('Kunne ikke hente leverandører:', e));
+
 // ── SUPPLIER FILTER ───────────────────────────────────────────
 let currentSupplierFilter = 'all';
 function setSupplierFilter(filter, el) {
@@ -2919,6 +2946,22 @@ function finalizeOnboarding() {
 
   SUPPLIERS.push(newSupplier);
   _lastAddedId = newSupplier.id;
+
+  // Gem i database
+  fetch('/api/suppliers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cvr: d.vat,
+      name: d.name,
+      address: d.address,
+      industry: d.industrydesc,
+      employees: d.employees,
+      phone: d.phone,
+      status: risk === 'low' ? 'compliant' : risk === 'medium' ? 'pending' : 'non-compliant',
+      notes: obForm.note || ''
+    })
+  }).catch(e => console.error('Kunne ikke gemme leverandør:', e));
 
   // Update all tables + counters
   document.getElementById('dashboard-supplier-tbody').innerHTML = SUPPLIERS.map(s=>renderSupplierRow(s)).join('');
