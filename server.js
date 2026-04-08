@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const PDFDocument = require('pdfkit');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const cron = require('node-cron');
 const { pool, init } = require('./db');
 
@@ -261,17 +261,10 @@ app.get('/api/export/pdf', requireAuth, async (req, res) => {
 });
 
 // ── Email / Compliance Arkiv ─────────────────────────────────
-function getMailTransport() {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  if (!host || !user || !pass) return null;
-  return nodemailer.createTransport({
-    host,
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: { user, pass },
-  });
+function getResend() {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return null;
+  return new Resend(key);
 }
 
 async function generateCompliancePDF(userId, userName, userEmail) {
@@ -391,15 +384,15 @@ app.post('/api/compliance/send-report', requireAuth, async (req, res) => {
       [req.user.id, targetEmail, filename, buffer, suppliersCount, auditEntries]
     );
 
-    // Send via email
-    const transport = getMailTransport();
-    if (transport) {
-      await transport.sendMail({
-        from: `"ChainGuard Compliance" <${process.env.SMTP_USER}>`,
-        to: targetEmail,
+    // Send via Resend
+    const resend = getResend();
+    if (resend) {
+      await resend.emails.send({
+        from: 'ChainGuard Compliance <compliance@chainguard.ai>',
+        to: [targetEmail],
         subject: `ChainGuard Compliance Rapport — ${new Date().toLocaleDateString('da-DK')}`,
         text: `Kære arkivmodtager,\n\nVedhæftet finder du ChainGuard compliance revisionsspor genereret ${new Date().toLocaleString('da-DK')}.\n\nRapporten indeholder:\n- ${suppliersCount} leverandør(er)\n- ${auditEntries} revisionsposter\n\nDokumentet er arkiveret i databasen jf. 5-års opbevaringskrav.\n\n— ChainGuard`,
-        attachments: [{ filename, content: buffer, contentType: 'application/pdf' }]
+        attachments: [{ filename, content: buffer.toString('base64'), contentType: 'application/pdf' }]
       });
     }
 
@@ -416,7 +409,7 @@ app.post('/api/compliance/send-report', requireAuth, async (req, res) => {
       filename,
       suppliersCount,
       auditEntries,
-      emailSent: !!transport
+      emailSent: !!getResend()
     });
   } catch (e) {
     console.error('Arkivering fejl:', e.message);
@@ -494,14 +487,14 @@ cron.schedule('0 6 * * *', async () => {
           [user.id, user.archive_email, filename, buffer, suppliersCount, auditEntries]
         );
 
-        const transport = getMailTransport();
-        if (transport) {
-          await transport.sendMail({
-            from: `"ChainGuard Compliance" <${process.env.SMTP_USER}>`,
-            to: user.archive_email,
+        const resend = getResend();
+        if (resend) {
+          await resend.emails.send({
+            from: 'ChainGuard Compliance <compliance@chainguard.ai>',
+            to: [user.archive_email],
             subject: `ChainGuard Daglig Compliance Rapport — ${new Date().toLocaleDateString('da-DK')}`,
             text: `Automatisk daglig compliance-rapport for ${user.name}.\n\nRapport dato: ${new Date().toLocaleString('da-DK')}\nLeverandører: ${suppliersCount}\nRevisionsposter: ${auditEntries}\n\nDokumentet er arkiveret i databasen jf. 5-års opbevaringskrav.\n\n— ChainGuard`,
-            attachments: [{ filename, content: buffer, contentType: 'application/pdf' }]
+            attachments: [{ filename, content: buffer.toString('base64'), contentType: 'application/pdf' }]
           });
         }
 
