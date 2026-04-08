@@ -190,7 +190,8 @@ function normalizeCVR(d) {
   };
 }
 
-app.get('/api/cvr/:cvr(\\d{8})', requireAuth, async (req, res) => {
+app.get('/api/cvr/:cvr', requireAuth, async (req, res) => {
+  if (!/^\d{8}$/.test(req.params.cvr)) return res.status(400).json({ error: 'Ugyldigt CVR-nummer' });
   try {
     const d = await httpsGet('https://cvrapi.dk/api?search=' + req.params.cvr + '&country=dk');
     if (d.error) return res.status(404).json({ error: 'NOT_FOUND' });
