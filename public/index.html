@@ -3753,8 +3753,12 @@ async function sendReportNow() {
     });
     const data = await r.json();
     if (r.ok) {
-      const emailInfo = data.emailSent ? `Sendt til ${data.sentTo}` : `Arkiveret (email ikke konfigureret på server)`;
-      showMsg(msg, `Rapport arkiveret — ${data.suppliersCount} leverandører, ${data.auditEntries} poster. ${emailInfo}.`, 'green');
+      let emailInfo;
+      if (data.emailSent) emailInfo = `Email sendt til ${data.sentTo}`;
+      else if (data.emailError) emailInfo = `Arkiveret OK, men email fejlede: ${data.emailError}`;
+      else emailInfo = `Arkiveret (RESEND_API_KEY ikke sat på server)`;
+      const color = data.emailSent ? 'green' : 'amber';
+      showMsg(msg, `Rapport arkiveret — ${data.suppliersCount} leverandører, ${data.auditEntries} poster. ${emailInfo}.`, color);
       loadComplianceArchive();
     } else {
       showMsg(msg, data.error || 'Fejl ved sending.', 'red');

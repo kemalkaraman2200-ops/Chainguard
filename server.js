@@ -386,14 +386,22 @@ app.post('/api/compliance/send-report', requireAuth, async (req, res) => {
 
     // Send via Resend
     const resend = getResend();
+    let emailSentOk = false;
+    let emailError = null;
     if (resend) {
-      await resend.emails.send({
-        from: 'ChainGuard Compliance <compliance@chainguard.ai>',
+      const result = await resend.emails.send({
+        from: 'ChainGuard Compliance <onboarding@resend.dev>',
         to: [targetEmail],
         subject: `ChainGuard Compliance Rapport — ${new Date().toLocaleDateString('da-DK')}`,
         text: `Kære arkivmodtager,\n\nVedhæftet finder du ChainGuard compliance revisionsspor genereret ${new Date().toLocaleString('da-DK')}.\n\nRapporten indeholder:\n- ${suppliersCount} leverandør(er)\n- ${auditEntries} revisionsposter\n\nDokumentet er arkiveret i databasen jf. 5-års opbevaringskrav.\n\n— ChainGuard`,
         attachments: [{ filename, content: buffer.toString('base64'), contentType: 'application/pdf' }]
       });
+      if (result.error) {
+        emailError = result.error.message || JSON.stringify(result.error);
+        console.error('Resend fejl:', emailError);
+      } else {
+        emailSentOk = true;
+      }
     }
 
     // Log i audit_log
@@ -409,7 +417,8 @@ app.post('/api/compliance/send-report', requireAuth, async (req, res) => {
       filename,
       suppliersCount,
       auditEntries,
-      emailSent: !!getResend()
+      emailSent: emailSentOk,
+      emailError: emailError
     });
   } catch (e) {
     console.error('Arkivering fejl:', e.message);
@@ -490,7 +499,7 @@ cron.schedule('0 6 * * *', async () => {
         const resend = getResend();
         if (resend) {
           await resend.emails.send({
-            from: 'ChainGuard Compliance <compliance@chainguard.ai>',
+            from: 'ChainGuard Compliance <onboarding@resend.dev>',
             to: [user.archive_email],
             subject: `ChainGuard Daglig Compliance Rapport — ${new Date().toLocaleDateString('da-DK')}`,
             text: `Automatisk daglig compliance-rapport for ${user.name}.\n\nRapport dato: ${new Date().toLocaleString('da-DK')}\nLeverandører: ${suppliersCount}\nRevisionsposter: ${auditEntries}\n\nDokumentet er arkiveret i databasen jf. 5-års opbevaringskrav.\n\n— ChainGuard`,
