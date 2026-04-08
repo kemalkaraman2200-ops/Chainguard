@@ -2231,6 +2231,11 @@ function navigateTo(page) {
   document.querySelector('.main').scrollTo(0,0);
   // animate bars on newly visible page
   setTimeout(animateBars,50);
+  // load compliance data når export åbnes
+  if (page === 'export') {
+    loadComplianceSettings();
+    loadComplianceArchive();
+  }
 }
 
 document.querySelectorAll('.nav-link[data-page]').forEach(el=>{
@@ -3763,16 +3768,6 @@ function showMsg(el, text, type) {
   el.style.color = colors[type] || 'var(--text-80)';
   el.textContent = text;
   el.style.display = 'block';
-}
-
-// Load compliance arkiv når export-siden åbnes
-const _origNavigateTo = navigateTo;
-function navigateTo(page) {
-  _origNavigateTo(page);
-  if (page === 'export') {
-    loadComplianceSettings();
-    loadComplianceArchive();
-  }
 }
 
 // Initial load af arkiv-indstillinger
