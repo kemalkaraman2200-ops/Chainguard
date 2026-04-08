@@ -2529,7 +2529,9 @@ function normalizeCvrapiHit(d) {
   };
 }
 
+let _currentCvrData = null;
 function renderCvrResult(d) {
+  _currentCvrData = d;
   const isActive = !d.enddate;
   const founded  = d.startdate ? d.startdate.split('-')[0] : '—';
   const industry = d.industrycode ? `${d.industrydesc} (${d.industrycode})` : (d.industrydesc || '—');
@@ -2557,7 +2559,7 @@ function renderCvrResult(d) {
       <div><div class="cvr-field-label">Telefon</div><div class="cvr-field-val">${escHtml(d.phone)}</div></div>
     </div>
     <div class="cvr-actions">
-      <button class="cvr-add-btn" id="cvr-add-btn" onclick="addSupplierFromVirk(${JSON.stringify(JSON.stringify(d))})">
+      <button class="cvr-add-btn" id="cvr-add-btn" onclick="addSupplierFromVirk()">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="white"><path d="M8 1a.75.75 0 01.75.75V7.25h5.5a.75.75 0 010 1.5H8.75v5.5a.75.75 0 01-1.5 0V8.75H1.75a.75.75 0 010-1.5H7.25V1.75A.75.75 0 018 1z"/></svg>
         Tilføj til database
       </button>
@@ -2648,7 +2650,8 @@ function addSupplierFromVirk(jsonStr) {
   const btn = document.getElementById('cvr-add-btn');
   if(!btn || btn.classList.contains('added')) return;
 
-  const d = JSON.parse(jsonStr);
+  const d = jsonStr ? JSON.parse(jsonStr) : _currentCvrData;
+  if(!d) return;
 
   // Check duplicate
   const exists = SUPPLIERS.find(s => s.cvr === d.vat);
