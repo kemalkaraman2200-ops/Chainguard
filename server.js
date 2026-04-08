@@ -3,6 +3,8 @@ const session = require('express-session');
 const https = require('https');
 const path = require('path');
 const url = require('url');
+const bcrypt = require('bcrypt');
+const { pool, init } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -142,21 +144,20 @@ app.get('/login', (req, res) => {
 </html>`);
 });
 
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-
-  const adminEmail = (process.env.ADMIN_EMAIL || '').trim().replace(/^"|"$/g, '');
-  const adminPassword = (process.env.ADMIN_PASSWORD || '').trim().replace(/^"|"$/g, '');
-  const adminName = (process.env.ADMIN_NAME || 'Admin').trim().replace(/^"|"$/g, '');
-
-  console.log(`Login forsøg: email="${email}" mod "${adminEmail}" | password match: ${password === adminPassword}`);
-
-  if (!adminEmail || email !== adminEmail || password !== adminPassword) {
-    return res.redirect('/login?error=1');
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
+    if (!user) return res.redirect('/login?error=1');
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.redirect('/login?error=1');
+    req.session.user = { id: user.id, email: user.email, name: user.name, role: user.role };
+    res.redirect('/');
+  } catch (e) {
+    console.error('Login fejl:', e.message);
+    res.redirect('/login?error=1');
   }
-
-  req.session.user = { email: adminEmail, name: adminName, role: 'admin' };
-  res.redirect('/');
 });
 
 app.get('/logout', (req, res) => {
@@ -216,10 +217,66 @@ app.get('/api/cvr/search/:query', requireAuth, async (req, res) => {
   }
 });
 
+// ── Leverandør API ──────────────────────────────────────────
+app.get('/api/suppliers', requireAuth, async (req, res) => {
+  const result = await pool.query(
+    'SELECT * FROM suppliers WHERE user_id = $1 ORDER BY added_at DESC',
+    [req.session.user.id]
+  );
+  res.json(result.rows);
+});
+
+app.post('/api/suppliers', requireAuth, async (req, res) => {
+  const { cvr, name, address, industry, employees, phone, status, notes } = req.body;
+  const result = await pool.query(
+    `INSERT INTO suppliers (user_id, cvr, name, address, industry, employees, phone, status, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [req.session.user.id, cvr, name, address, industry, employees, phone, status || 'pending', notes]
+  );
+  await pool.query(
+    'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+    [req.session.user.id, result.rows[0].id, 'TILFØJET', `CVR: ${cvr}`]
+  );
+  res.json(result.rows[0]);
+});
+
+app.patch('/api/suppliers/:id', requireAuth, async (req, res) => {
+  const { status, notes } = req.body;
+  const result = await pool.query(
+    `UPDATE suppliers SET status=$1, notes=$2, updated_at=NOW()
+     WHERE id=$3 AND user_id=$4 RETURNING *`,
+    [status, notes, req.params.id, req.session.user.id]
+  );
+  if (!result.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+  await pool.query(
+    'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+    [req.session.user.id, req.params.id, 'OPDATERET', `Status: ${status}`]
+  );
+  res.json(result.rows[0]);
+});
+
+app.delete('/api/suppliers/:id', requireAuth, async (req, res) => {
+  await pool.query('DELETE FROM suppliers WHERE id=$1 AND user_id=$2', [req.params.id, req.session.user.id]);
+  res.json({ ok: true });
+});
+
+app.get('/api/audit/:supplierId', requireAuth, async (req, res) => {
+  const result = await pool.query(
+    'SELECT * FROM audit_log WHERE supplier_id=$1 ORDER BY created_at DESC',
+    [req.params.supplierId]
+  );
+  res.json(result.rows);
+});
+
 // ── Dashboard (kræver login) ─────────────────────────────────
 app.use('/', requireAuth, express.static(path.join(__dirname, 'public')));
 
 // ── Start ────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n✅  ChainGuard kører på port ${PORT}\n`);
+init().then(() => {
+  app.listen(PORT, () => {
+    console.log(`\n✅  ChainGuard kører på port ${PORT}\n`);
+  });
+}).catch(e => {
+  console.error('Database fejl:', e.message);
+  process.exit(1);
 });
