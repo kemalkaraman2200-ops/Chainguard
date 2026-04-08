@@ -169,6 +169,8 @@ app.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.redirect('/login?error=1');
     req.session.user = { id: user.id, email: user.email, name: user.name, role: user.role };
+    // Investorer sendes til investor-siden
+    if (user.role === 'investor') return res.redirect('/investor');
     res.redirect('/');
   } catch (e) {
     console.error('Login fejl:', e.message);
@@ -291,6 +293,102 @@ app.get('/api/audit/:supplierId', requireAuth, async (req, res) => {
     [req.params.supplierId]
   );
   res.json(result.rows);
+});
+
+// ── Investor side ────────────────────────────────────────────
+app.get('/investor', requireAuth, (req, res) => {
+  // Kun admin og investor
+  if (!req.session.user) return res.redirect('/login');
+  res.send(`<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChainGuard — Investor Overblik</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: #080C20; color: #fff; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+.topbar { display:flex; align-items:center; justify-content:space-between; padding:18px 40px; border-bottom:1px solid rgba(255,255,255,0.07); background:rgba(8,12,32,0.8); backdrop-filter:blur(20px); position:sticky; top:0; z-index:10; }
+.brand { display:flex; align-items:center; gap:12px; }
+.brand-icon { width:36px;height:36px;background:linear-gradient(140deg,#9270FF,#635BFF);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(124,92,252,0.5);font-size:18px; }
+.brand-name { font-size:16px;font-weight:800;letter-spacing:-0.5px; }
+.badge { background:rgba(124,92,252,0.15);border:1px solid rgba(124,92,252,0.3);color:#A78BFA;font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px; }
+.logout { color:rgba(255,255,255,0.4);font-size:13px;text-decoration:none;transition:color 0.15s; }
+.logout:hover { color:#FF4D6A; }
+.content { max-width:1100px; margin:0 auto; padding:48px 40px; }
+h1 { font-size:28px;font-weight:800;letter-spacing:-0.5px;margin-bottom:8px; }
+.sub { color:rgba(255,255,255,0.45);font-size:15px;margin-bottom:40px; }
+.kpi-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:40px; }
+.kpi { background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:24px; }
+.kpi-val { font-size:36px;font-weight:800;letter-spacing:-1px;margin-bottom:4px; }
+.kpi-label { font-size:12px;font-weight:600;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.8px; }
+.kpi-sub { font-size:12px;color:rgba(255,255,255,0.3);margin-top:4px; }
+.green { color:#00DFA0; } .violet { color:#A78BFA; } .blue { color:#4A9FFF; } .amber { color:#FFAD0D; }
+.card { background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:28px;margin-bottom:20px; }
+.card h2 { font-size:16px;font-weight:700;margin-bottom:20px; }
+.row { display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:14px; }
+.row:last-child { border-bottom:none; }
+.row-label { color:rgba(255,255,255,0.5); }
+.row-val { font-weight:600; }
+.tag { display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700; }
+.tag-green { background:rgba(0,223,160,0.12);color:#00DFA0;border:1px solid rgba(0,223,160,0.3); }
+.tag-amber { background:rgba(255,173,13,0.12);color:#FFAD0D;border:1px solid rgba(255,173,13,0.3); }
+.milestone { display:flex;gap:16px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,0.06); }
+.milestone:last-child { border-bottom:none; }
+.dot { width:10px;height:10px;border-radius:50%;background:#00DFA0;margin-top:4px;flex-shrink:0; }
+.dot.pending { background:#FFAD0D; }
+.ms-title { font-size:14px;font-weight:600;margin-bottom:2px; }
+.ms-sub { font-size:12px;color:rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-icon">🛡</div>
+    <div class="brand-name">ChainGuard</div>
+    <span class="badge">Investor</span>
+  </div>
+  <a href="/logout" class="logout">Log ud →</a>
+</div>
+<div class="content">
+  <h1>Investor Overblik</h1>
+  <p class="sub">Fortrolig — kun til investorer</p>
+
+  <div class="kpi-grid">
+    <div class="kpi"><div class="kpi-val green">3</div><div class="kpi-label">Betalende kunder</div><div class="kpi-sub">Mål: 20 inden Q3 2026</div></div>
+    <div class="kpi"><div class="kpi-val violet">499 kr</div><div class="kpi-label">Pris pr. måned</div><div class="kpi-sub">Per virksomhed</div></div>
+    <div class="kpi"><div class="kpi-val blue">1.497 kr</div><div class="kpi-label">MRR</div><div class="kpi-sub">Monthly Recurring Revenue</div></div>
+    <div class="kpi"><div class="kpi-val amber">~50.000</div><div class="kpi-label">Adresserbart marked</div><div class="kpi-sub">Danske entreprenører</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Forretningsmodel</h2>
+    <div class="row"><span class="row-label">Model</span><span class="row-val">SaaS — månedligt abonnement</span></div>
+    <div class="row"><span class="row-label">Pris</span><span class="row-val">499 kr/md · første måned gratis</span></div>
+    <div class="row"><span class="row-label">Målgruppe</span><span class="row-val">Hoved- og totalentreprenører i Danmark</span></div>
+    <div class="row"><span class="row-label">Problem</span><span class="row-val">Kommuner kræver kædeansvarsdokumentation</span></div>
+    <div class="row"><span class="row-label">Løsning</span><span class="row-val">Automatisk CVR-tjek + revisionsspor</span></div>
+    <div class="row"><span class="row-label">Status</span><span class="row-val"><span class="tag tag-green">Live</span></span></div>
+  </div>
+
+  <div class="card">
+    <h2>Milepæle</h2>
+    <div class="milestone"><div class="dot"></div><div><div class="ms-title">Platform lanceret</div><div class="ms-sub">April 2026 · Live på railway.app</div></div></div>
+    <div class="milestone"><div class="dot"></div><div><div class="ms-title">Første betalende kunde</div><div class="ms-sub">April 2026 · Igangværende</div></div></div>
+    <div class="milestone"><div class="dot pending"></div><div><div class="ms-title">10 betalende kunder</div><div class="ms-sub">Mål: Juni 2026</div></div></div>
+    <div class="milestone"><div class="dot pending"></div><div><div class="ms-title">Kommunal anbefaling</div><div class="ms-sub">Mål: Q3 2026 · Dialog igangsat</div></div></div>
+    <div class="milestone"><div class="dot pending"></div><div><div class="ms-title">20 kunder · break-even</div><div class="ms-sub">Mål: Q4 2026</div></div></div>
+  </div>
+
+  <div class="card">
+    <h2>Kontakt</h2>
+    <div class="row"><span class="row-label">Stifter</span><span class="row-val">Christian</span></div>
+    <div class="row"><span class="row-label">Email</span><span class="row-val">christian@chainguard.ai</span></div>
+  </div>
+</div>
+</body>
+</html>`);
 });
 
 // ── Dashboard (kræver login) ─────────────────────────────────
