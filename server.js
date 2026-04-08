@@ -145,9 +145,11 @@ app.get('/login', (req, res) => {
 app.post('/login', (req, res) => {
   const { email, password } = req.body;
 
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPassword = process.env.ADMIN_PASSWORD;
-  const adminName = process.env.ADMIN_NAME || 'Admin';
+  const adminEmail = (process.env.ADMIN_EMAIL || '').trim().replace(/^"|"$/g, '');
+  const adminPassword = (process.env.ADMIN_PASSWORD || '').trim().replace(/^"|"$/g, '');
+  const adminName = (process.env.ADMIN_NAME || 'Admin').trim().replace(/^"|"$/g, '');
+
+  console.log(`Login forsøg: email="${email}" mod "${adminEmail}" | password match: ${password === adminPassword}`);
 
   if (!adminEmail || email !== adminEmail || password !== adminPassword) {
     return res.redirect('/login?error=1');
