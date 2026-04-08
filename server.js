@@ -145,13 +145,15 @@ app.get('/login', (req, res) => {
 app.post('/login', (req, res) => {
   const { email, password } = req.body;
 
-  // Brugere fra miljøvariabler — udvides med DB i punkt 3
-  const users = JSON.parse(process.env.USERS || '[]');
-  const user = users.find(u => u.email === email && u.password === password);
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  const adminName = process.env.ADMIN_NAME || 'Admin';
 
-  if (!user) return res.redirect('/login?error=1');
+  if (!adminEmail || email !== adminEmail || password !== adminPassword) {
+    return res.redirect('/login?error=1');
+  }
 
-  req.session.user = { email: user.email, name: user.name, role: user.role || 'user' };
+  req.session.user = { email: adminEmail, name: adminName, role: 'admin' };
   res.redirect('/');
 });
 
