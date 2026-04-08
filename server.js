@@ -1,6 +1,5 @@
 const express = require('express');
 const session = require('express-session');
-const PgSession = require('connect-pg-simple')(session);
 const https = require('https');
 const path = require('path');
 const url = require('url');
@@ -14,12 +13,17 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  store: new PgSession({ pool, createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'chainguard-secret-skift-i-prod',
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 8 * 60 * 60 * 1000 } // 8 timer
 }));
+
+// Global fejlhåndtering
+app.use((err, req, res, next) => {
+  console.error('Server fejl:', err.message);
+  res.status(500).send('Noget gik galt — prøv at genindlæse siden.');
+});
 
 // ── Auth middleware ─────────────────────────────────────────
 function requireAuth(req, res, next) {
