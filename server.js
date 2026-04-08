@@ -146,6 +146,16 @@ app.get('/login', (req, res) => {
 
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
+
+  // Fallback: env var auth
+  const adminEmail = (process.env.ADMIN_EMAIL || '').trim();
+  const adminPassword = (process.env.ADMIN_PASSWORD || '').trim();
+  if (adminEmail && email === adminEmail && password === adminPassword) {
+    req.session.user = { id: 1, email: adminEmail, name: process.env.ADMIN_NAME || 'Admin', role: 'admin' };
+    return res.redirect('/');
+  }
+
+  // Database auth
   try {
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = result.rows[0];
