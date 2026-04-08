@@ -6,6 +6,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const PDFDocument = require('pdfkit');
+const nodemailer = require('nodemailer');
+const cron = require('node-cron');
 const { pool, init } = require('./db');
 
 const app = express();
@@ -244,37 +246,69 @@ app.delete('/api/suppliers/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ── PDF Export ───────────────────────────────────────────────
+// ── PDF Export (download direkte) ───────────────────────────
 app.get('/api/export/pdf', requireAuth, async (req, res) => {
   try {
-    const suppliers = await pool.query(
-      'SELECT * FROM suppliers WHERE user_id = $1 ORDER BY added_at DESC',
-      [req.user.id]
-    );
-    const auditLog = await pool.query(
-      `SELECT a.*, s.name as supplier_name, s.cvr
-       FROM audit_log a
-       LEFT JOIN suppliers s ON s.id = a.supplier_id
-       WHERE a.user_id = $1
-       ORDER BY a.created_at DESC
-       LIMIT 100`,
-      [req.user.id]
-    );
-
-    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    const { buffer } = await generateCompliancePDF(req.user.id, req.user.name, req.user.email);
+    const dateStr = new Date().toISOString().split('T')[0];
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="chainguard-revisionsspor-${new Date().toISOString().split('T')[0]}.pdf"`);
-    doc.pipe(res);
+    res.setHeader('Content-Disposition', `attachment; filename="chainguard-revisionsspor-${dateStr}.pdf"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error('PDF fejl:', e.message, e.stack);
+    res.status(500).send('PDF fejl: ' + e.message);
+  }
+});
+
+// ── Email / Compliance Arkiv ─────────────────────────────────
+function getMailTransport() {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) return null;
+  return nodemailer.createTransport({
+    host,
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: { user, pass },
+  });
+}
+
+async function generateCompliancePDF(userId, userName, userEmail) {
+  const suppliers = await pool.query(
+    'SELECT * FROM suppliers WHERE user_id = $1 ORDER BY added_at DESC',
+    [userId]
+  );
+  const auditLog = await pool.query(
+    `SELECT a.*, s.name as supplier_name, s.cvr
+     FROM audit_log a
+     LEFT JOIN suppliers s ON s.id = a.supplier_id
+     WHERE a.user_id = $1
+     ORDER BY a.created_at DESC
+     LIMIT 500`,
+    [userId]
+  );
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve({
+      buffer: Buffer.concat(chunks),
+      suppliersCount: suppliers.rows.length,
+      auditEntries: auditLog.rows.length
+    }));
+    doc.on('error', reject);
 
     // Header
     doc.fontSize(22).font('Helvetica-Bold').fillColor('#1a1a2e').text('ChainGuard', { continued: true });
     doc.fontSize(12).font('Helvetica').fillColor('#666').text('  —  Compliance Revisionsspor', { align: 'left' });
     doc.moveDown(0.5);
-    doc.fontSize(10).fillColor('#888').text(`Genereret: ${new Date().toLocaleString('da-DK')}`, { align: 'left' });
-    doc.text(`Bruger: ${req.user.name} (${req.user.email})`);
+    doc.fontSize(10).fillColor('#888').text(`Genereret: ${new Date().toLocaleString('da-DK')}`);
+    doc.text(`Bruger: ${userName} (${userEmail})`);
+    doc.text(`Arkiveringspligt: 5 år jf. EU's kædeansvarsdirektiv`);
     doc.moveDown(1);
 
-    // Linje
     doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').stroke();
     doc.moveDown(1);
 
@@ -288,13 +322,13 @@ app.get('/api/export/pdf', requireAuth, async (req, res) => {
       suppliers.rows.forEach((s, i) => {
         const statusColor = s.status === 'compliant' ? '#00875A' : s.status === 'non-compliant' ? '#DE350B' : '#FF8B00';
         const statusLabel = s.status === 'compliant' ? 'Godkendt' : s.status === 'non-compliant' ? 'Ikke godkendt' : 'Afventer';
-
         doc.fontSize(11).font('Helvetica-Bold').fillColor('#1a1a2e').text(`${i + 1}. ${s.name}`);
         doc.fontSize(9).font('Helvetica').fillColor('#555')
           .text(`CVR: ${s.cvr}  |  Branche: ${s.industry || '—'}  |  Adresse: ${s.address || '—'}`);
         doc.fontSize(9).fillColor(statusColor).text(`Status: ${statusLabel}`);
         if (s.notes) doc.fontSize(9).fillColor('#777').text(`Note: ${s.notes}`);
-        doc.fontSize(8).fillColor('#aaa').text(`Tilføjet: ${new Date(s.added_at).toLocaleString('da-DK')}`);
+        doc.fontSize(8).fillColor('#aaa')
+          .text(`Tilføjet: ${new Date(s.added_at).toLocaleString('da-DK')}  |  Opdateret: ${new Date(s.updated_at).toLocaleString('da-DK')}`);
         doc.moveDown(0.6);
       });
     }
@@ -304,7 +338,7 @@ app.get('/api/export/pdf', requireAuth, async (req, res) => {
     doc.moveDown(1);
 
     // Audit log
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a1a2e').text('Revisionsspor');
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a1a2e').text('Revisionsspor (tidsstemplet)');
     doc.moveDown(0.5);
 
     if (auditLog.rows.length === 0) {
@@ -326,16 +360,166 @@ app.get('/api/export/pdf', requireAuth, async (req, res) => {
     doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').stroke();
     doc.moveDown(0.5);
     doc.fontSize(8).fillColor('#aaa').text(
-      `Dette dokument er genereret automatisk af ChainGuard og indeholder et tidsstemplet revisionsspor. Dokumentet kan fremvises som dokumentation for due diligence i forbindelse med kædeansvar.`,
+      `Dette dokument er genereret automatisk af ChainGuard og indeholder et tidsstemplet revisionsspor. ` +
+      `Dokumentet opfylder kravene til kædeansvarsdokumentation jf. EU-direktiv 2022/2464 og den danske lov om kædeansvar. ` +
+      `Opbevaringspligt: minimum 5 år. Arkiveret: ${new Date().toLocaleString('da-DK')}`,
       { align: 'center' }
     );
 
     doc.end();
+  });
+}
+
+// Compliance arkiv: send rapport via email + gem i DB
+app.post('/api/compliance/send-report', requireAuth, async (req, res) => {
+  const { archiveEmail } = req.body;
+  const targetEmail = archiveEmail || (await pool.query('SELECT archive_email FROM users WHERE id=$1', [req.user.id])).rows[0]?.archive_email;
+
+  if (!targetEmail) {
+    return res.status(400).json({ error: 'Ingen arkiv-email konfigureret. Gem en arkiv-email i Indstillinger.' });
+  }
+
+  try {
+    const { buffer, suppliersCount, auditEntries } = await generateCompliancePDF(req.user.id, req.user.name, req.user.email);
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `chainguard-compliance-${dateStr}.pdf`;
+
+    // Gem i database (5-års arkiv)
+    const archiveResult = await pool.query(
+      `INSERT INTO compliance_archive (user_id, sent_to, filename, pdf_data, suppliers_count, audit_entries, trigger_type)
+       VALUES ($1,$2,$3,$4,$5,$6,'manual') RETURNING id`,
+      [req.user.id, targetEmail, filename, buffer, suppliersCount, auditEntries]
+    );
+
+    // Send via email
+    const transport = getMailTransport();
+    if (transport) {
+      await transport.sendMail({
+        from: `"ChainGuard Compliance" <${process.env.SMTP_USER}>`,
+        to: targetEmail,
+        subject: `ChainGuard Compliance Rapport — ${new Date().toLocaleDateString('da-DK')}`,
+        text: `Kære arkivmodtager,\n\nVedhæftet finder du ChainGuard compliance revisionsspor genereret ${new Date().toLocaleString('da-DK')}.\n\nRapporten indeholder:\n- ${suppliersCount} leverandør(er)\n- ${auditEntries} revisionsposter\n\nDokumentet er arkiveret i databasen jf. 5-års opbevaringskrav.\n\n— ChainGuard`,
+        attachments: [{ filename, content: buffer, contentType: 'application/pdf' }]
+      });
+    }
+
+    // Log i audit_log
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'RAPPORT ARKIVERET', `Sendt til ${targetEmail} — ${suppliersCount} leverandører, ${auditEntries} poster`]
+    );
+
+    res.json({
+      ok: true,
+      archiveId: archiveResult.rows[0].id,
+      sentTo: targetEmail,
+      filename,
+      suppliersCount,
+      auditEntries,
+      emailSent: !!transport
+    });
   } catch (e) {
-    console.error('PDF fejl:', e.message, e.stack);
-    res.status(500).send('PDF fejl: ' + e.message);
+    console.error('Arkivering fejl:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
+
+// Hent compliance arkiv-liste
+app.get('/api/compliance/archive', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, sent_at, sent_to, filename, suppliers_count, audit_entries, trigger_type, status
+       FROM compliance_archive WHERE user_id = $1
+       ORDER BY sent_at DESC LIMIT 50`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Download arkiveret PDF
+app.get('/api/compliance/archive/:id/pdf', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT pdf_data, filename FROM compliance_archive WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!result.rows[0]) return res.status(404).send('Ikke fundet');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${result.rows[0].filename}"`);
+    res.send(result.rows[0].pdf_data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Gem/hent arkiv-email indstilling
+app.post('/api/compliance/settings', requireAuth, async (req, res) => {
+  const { archiveEmail } = req.body;
+  try {
+    await pool.query('UPDATE users SET archive_email=$1 WHERE id=$2', [archiveEmail, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/compliance/settings', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT archive_email FROM users WHERE id=$1', [req.user.id]);
+    res.json({ archiveEmail: result.rows[0]?.archive_email || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Daglig cron: send compliance rapport kl. 06:00 ──────────
+cron.schedule('0 6 * * *', async () => {
+  console.log('[CRON] Daglig compliance arkivering starter...');
+  try {
+    const users = await pool.query(
+      'SELECT id, name, email, archive_email FROM users WHERE archive_email IS NOT NULL AND archive_email != \'\''
+    );
+    for (const user of users.rows) {
+      try {
+        const { buffer, suppliersCount, auditEntries } = await generateCompliancePDF(user.id, user.name, user.email);
+        const dateStr = new Date().toISOString().split('T')[0];
+        const filename = `chainguard-compliance-${dateStr}.pdf`;
+
+        await pool.query(
+          `INSERT INTO compliance_archive (user_id, sent_to, filename, pdf_data, suppliers_count, audit_entries, trigger_type)
+           VALUES ($1,$2,$3,$4,$5,$6,'auto')`,
+          [user.id, user.archive_email, filename, buffer, suppliersCount, auditEntries]
+        );
+
+        const transport = getMailTransport();
+        if (transport) {
+          await transport.sendMail({
+            from: `"ChainGuard Compliance" <${process.env.SMTP_USER}>`,
+            to: user.archive_email,
+            subject: `ChainGuard Daglig Compliance Rapport — ${new Date().toLocaleDateString('da-DK')}`,
+            text: `Automatisk daglig compliance-rapport for ${user.name}.\n\nRapport dato: ${new Date().toLocaleString('da-DK')}\nLeverandører: ${suppliersCount}\nRevisionsposter: ${auditEntries}\n\nDokumentet er arkiveret i databasen jf. 5-års opbevaringskrav.\n\n— ChainGuard`,
+            attachments: [{ filename, content: buffer, contentType: 'application/pdf' }]
+          });
+        }
+
+        await pool.query(
+          'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+          [user.id, 'AUTO-ARKIVERING', `Daglig rapport sendt til ${user.archive_email}`]
+        );
+
+        console.log(`[CRON] Rapport sendt for ${user.email} → ${user.archive_email}`);
+      } catch (e) {
+        console.error(`[CRON] Fejl for bruger ${user.email}:`, e.message);
+      }
+    }
+    console.log('[CRON] Daglig compliance arkivering færdig.');
+  } catch (e) {
+    console.error('[CRON] Kritisk fejl:', e.message);
+  }
+}, { timezone: 'Europe/Copenhagen' });
 
 // ── Investor side ────────────────────────────────────────────
 app.get('/investor', requireAuth, (req, res) => {

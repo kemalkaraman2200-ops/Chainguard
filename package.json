@@ -16,6 +16,8 @@
     "express": "^4.22.1",
     "express-session": "^1.19.0",
     "jsonwebtoken": "^9.0.3",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.10.1",
     "pdfkit": "^0.18.0",
     "pg": "^8.20.0"
   }

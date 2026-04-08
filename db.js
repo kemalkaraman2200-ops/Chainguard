@@ -39,6 +39,22 @@ async function init() {
       details     TEXT,
       created_at  TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS compliance_archive (
+      id               SERIAL PRIMARY KEY,
+      user_id          INTEGER REFERENCES users(id),
+      sent_at          TIMESTAMPTZ DEFAULT NOW(),
+      sent_to          VARCHAR(255),
+      filename         VARCHAR(255),
+      pdf_data         BYTEA,
+      suppliers_count  INTEGER DEFAULT 0,
+      audit_entries    INTEGER DEFAULT 0,
+      trigger_type     VARCHAR(20) DEFAULT 'manual',
+      status           VARCHAR(20) DEFAULT 'sent',
+      error_msg        TEXT
+    );
+
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS archive_email VARCHAR(255);
   `);
   console.log('Database tabeller klar');
 }

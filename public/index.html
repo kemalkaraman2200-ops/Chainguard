@@ -1745,64 +1745,87 @@ Aarhus Havnefront</div>
     ══════════════════════════════════ -->
     <div class="page-view" id="page-export">
       <div class="section-head">
-        <div><div class="section-title">Eksport</div><div class="section-sub">Generer rapporter og eksportér data</div></div>
+        <div><div class="section-title">Compliance Arkiv</div><div class="section-sub">Generer, arkivér og send compliance-dokumentation — 5-års opbevaring jf. EU-kædeansvarsdirektiv</div></div>
       </div>
+
+      <!-- EU compliance info banner -->
+      <div style="background:var(--blue-dim);border:1px solid var(--blue-ring);border-radius:var(--r);padding:14px 18px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="var(--blue)" style="flex-shrink:0;margin-top:1px"><path d="M8 16A8 8 0 108 0a8 8 0 000 16zm.93-9.412l-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 110-2 1 1 0 010 2z"/></svg>
+        <div style="font-size:12.5px;color:var(--text-80)"><strong style="color:var(--text-100)">EU Kædeansvar — 5-års arkivpligt</strong><br>Jf. den danske lov om arbejdsklausuler og kædeansvar samt EU-direktiv 2022/2464 (CSRD) skal compliance-dokumentation opbevares i minimum 5 år. ChainGuard gemmer alle rapporter i databasen med tidsstempel.</div>
+      </div>
+
       <div class="row row-half">
-        <div class="card">
-          <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Rapporttyper</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
-          <div class="card-body">
-          <div id="export-options">
-            <div class="export-option">
-              <div class="export-icon" style="background:var(--red-dim);border:1px solid var(--red-ring)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--red)"><path d="M4 0a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4.5L9.5 0H4zm5.5 0v4h4M4 9h8M4 11h5"/></svg></div>
-              <div><div class="export-name">Compliance rapport (PDF)</div><div class="export-desc">Fuld oversigt over alle leverandørers status</div></div>
-              <button class="btn btn-ghost" style="flex-shrink:0">Generer</button>
+        <!-- Venstre kolonne -->
+        <div>
+          <!-- Arkiv-email indstilling -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-head" onclick="toggleCard(this)">
+              <div class="card-title">Arkiv-email indstilling</div>
+              <div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
             </div>
-            <div class="export-option">
-              <div class="export-icon" style="background:var(--green-dim);border:1px solid var(--green-ring)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--green)"><path d="M4 0a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4.5L9.5 0H4zm5.5 0v4h4M4 7h8v5H4z"/></svg></div>
-              <div><div class="export-name">Leverandørdata (Excel)</div><div class="export-desc">Alle leverandører med scores, status og kontakter</div></div>
-              <button class="btn btn-ghost" style="flex-shrink:0">Eksportér</button>
+            <div class="card-body">
+            <div style="padding:18px 22px;position:relative;z-index:1">
+              <p style="font-size:12.5px;color:var(--text-50);margin-bottom:14px">Compliance-rapporter sendes automatisk dagligt kl. 06:00 til denne email. Brug en dedikeret arkiv-email kun til compliance.</p>
+              <label style="font-size:12px;font-weight:600;color:var(--text-50);display:block;margin-bottom:6px">Arkiv-email adresse</label>
+              <input type="email" id="archive-email-input" placeholder="compliance-arkiv@dinvirksomhed.dk" style="width:100%;background:var(--bg-input);border:1px solid var(--border-med);border-radius:var(--r-sm);padding:10px 12px;color:var(--text-100);font-size:13px;font-family:var(--font);outline:none;margin-bottom:12px">
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" style="flex:1" onclick="saveArchiveEmail()">Gem email</button>
+                <button class="btn btn-ghost" style="flex:1" onclick="sendReportNow()">Send rapport nu</button>
+              </div>
+              <div id="archive-settings-msg" style="margin-top:10px;font-size:12.5px;display:none"></div>
             </div>
-            <div class="export-option">
-              <div class="export-icon" style="background:var(--blue-dim);border:1px solid var(--blue-ring)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--blue)"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v1H2V3zm0 3h12v7a1 1 0 01-1 1H3a1 1 0 01-1-1V6z"/></svg></div>
-              <div><div class="export-name">ESG Due Diligence rapport</div><div class="export-desc">Bæredygtighedsdata til interessenter og revisorer</div></div>
-              <button class="btn btn-ghost" style="flex-shrink:0">Generer</button>
-            </div>
-            <div class="export-option">
-              <div class="export-icon" style="background:var(--amber-dim);border:1px solid var(--amber-ring)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--amber)"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 4.25a.75.75 0 10-1.5 0v3.5l2 2a.75.75 0 001.06-1.06L8.75 8V5.25z"/></svg></div>
-              <div><div class="export-name">Risikorapport</div><div class="export-desc">Detaljeret analyse af risikofaktorer og anbefalinger</div></div>
-              <button class="btn btn-ghost" style="flex-shrink:0">Generer</button>
-            </div>
-            <div class="export-option">
-              <div class="export-icon" style="background:var(--violet-dim);border:1px solid rgba(124,92,252,0.3)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--violet-l)"><path d="M5 3a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V5a2 2 0 00-2-2H5zm.5 3a.5.5 0 010-1h5a.5.5 0 010 1h-5zm0 2a.5.5 0 010-1h5a.5.5 0 010 1h-5zm0 2a.5.5 0 010-1h3a.5.5 0 010 1h-3z"/></svg></div>
-              <div><div class="export-name">Afvigelseslog (CSV)</div><div class="export-desc">Alle afvigelser med status, ansvarlig og løsningsdato</div></div>
-              <button class="btn btn-ghost" style="flex-shrink:0">Eksportér</button>
             </div>
           </div>
+
+          <!-- Rapporttyper -->
+          <div class="card">
+            <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Rapporttyper</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
+            <div class="card-body">
+            <div id="export-options">
+              <div class="export-option">
+                <div class="export-icon" style="background:var(--red-dim);border:1px solid var(--red-ring)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--red)"><path d="M4 0a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4.5L9.5 0H4zm5.5 0v4h4M4 9h8M4 11h5"/></svg></div>
+                <div><div class="export-name">Compliance rapport (PDF)</div><div class="export-desc">Fuld oversigt · tidsstemplet revisionsspor · 5-års arkiv</div></div>
+                <button class="btn btn-ghost" style="flex-shrink:0" onclick="window.location.href='/api/export/pdf'">Download</button>
+              </div>
+              <div class="export-option">
+                <div class="export-icon" style="background:var(--green-dim);border:1px solid var(--green-ring)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--green)"><path d="M4 0a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4.5L9.5 0H4zm5.5 0v4h4M4 7h8v5H4z"/></svg></div>
+                <div><div class="export-name">Send til arkiv (PDF + email)</div><div class="export-desc">Generér, gem i database og send til arkiv-email</div></div>
+                <button class="btn btn-ghost" style="flex-shrink:0" onclick="sendReportNow()">Send</button>
+              </div>
+              <div class="export-option" style="opacity:0.5">
+                <div class="export-icon" style="background:var(--blue-dim);border:1px solid var(--blue-ring)"><svg width="18" height="18" viewBox="0 0 16 16" fill="var(--blue)"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v1H2V3zm0 3h12v7a1 1 0 01-1 1H3a1 1 0 01-1-1V6z"/></svg></div>
+                <div><div class="export-name">ESG Due Diligence</div><div class="export-desc">Kommer snart</div></div>
+                <button class="btn btn-ghost" style="flex-shrink:0" disabled>Snart</button>
+              </div>
+            </div>
+            </div>
           </div>
         </div>
+
+        <!-- Højre kolonne -->
         <div>
+          <!-- Daglig auto-arkivering status -->
           <div class="card" style="margin-bottom:16px">
-            <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Nylige eksporter</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
-            <div class="card-body">
-            <div class="doc-list">
-              <div class="doc-item"><div class="doc-info"><div class="doc-label">Compliance rapport — feb 2025</div><div class="doc-sub">Genereret 28.02.2025 · PDF · 2.4 MB</div></div><button class="btn btn-ghost" style="flex-shrink:0;padding:5px 12px;font-size:12px">Download</button></div>
-              <div class="doc-item"><div class="doc-info"><div class="doc-label">Leverandørdata jan 2025</div><div class="doc-sub">Genereret 31.01.2025 · Excel · 890 KB</div></div><button class="btn btn-ghost" style="flex-shrink:0;padding:5px 12px;font-size:12px">Download</button></div>
-              <div class="doc-item"><div class="doc-info"><div class="doc-label">ESG rapport Q4 2024</div><div class="doc-sub">Genereret 15.01.2025 · PDF · 5.1 MB</div></div><button class="btn btn-ghost" style="flex-shrink:0;padding:5px 12px;font-size:12px">Download</button></div>
-            </div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Planlagte rapporter</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
+            <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Automatisk daglig arkivering</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
             <div class="card-body">
             <div style="padding:18px 22px;position:relative;z-index:1">
               <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-                <div><div style="font-size:13px;font-weight:600;color:var(--text-80)">Månedlig compliance</div><div style="font-size:11.5px;color:var(--text-30);margin-top:2px">Første mandag i måneden</div></div>
-                <span class="chip chip-green">Aktiv</span>
+                <div><div style="font-size:13px;font-weight:600;color:var(--text-80)">Daglig compliance-rapport</div><div style="font-size:11.5px;color:var(--text-30);margin-top:2px">Sendes kl. 06:00 hver dag (dansk tid)</div></div>
+                <span id="auto-archive-status" class="chip chip-amber">Opsæt email</span>
               </div>
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0">
-                <div><div style="font-size:13px;font-weight:600;color:var(--text-80)">Kvartalsvis ESG</div><div style="font-size:11.5px;color:var(--text-30);margin-top:2px">Næste: 01.04.2025</div></div>
-                <span class="chip chip-green">Aktiv</span>
+              <div style="padding:10px 0">
+                <div style="font-size:11.5px;color:var(--text-30)">Alle rapporter gemmes i databasen i 5 år uanset email-indstilling.</div>
               </div>
+            </div>
+            </div>
+          </div>
+
+          <!-- Compliance arkiv-liste -->
+          <div class="card">
+            <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Arkiverede rapporter</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
+            <div class="card-body">
+            <div id="archive-list" class="doc-list">
+              <div style="padding:18px 22px;font-size:12.5px;color:var(--text-30)">Indlæser arkiv...</div>
             </div>
             </div>
           </div>
@@ -3644,6 +3667,116 @@ function toggleNavSection(id, labelEl) {
   updatePill();
   setInterval(updatePill, 30000);
 })();
+
+// ── COMPLIANCE ARKIV ──────────────────────────────────────────
+async function loadComplianceSettings() {
+  try {
+    const r = await fetch('/api/compliance/settings', { credentials: 'same-origin' });
+    const data = await r.json();
+    const input = document.getElementById('archive-email-input');
+    const statusChip = document.getElementById('auto-archive-status');
+    if (data.archiveEmail) {
+      input.value = data.archiveEmail;
+      if (statusChip) {
+        statusChip.textContent = 'Aktiv';
+        statusChip.className = 'chip chip-green';
+      }
+    }
+  } catch(e) { console.error('Compliance settings fejl:', e); }
+}
+
+async function loadComplianceArchive() {
+  try {
+    const r = await fetch('/api/compliance/archive', { credentials: 'same-origin' });
+    const rows = await r.json();
+    const list = document.getElementById('archive-list');
+    if (!list) return;
+    if (!rows.length) {
+      list.innerHTML = '<div style="padding:18px 22px;font-size:12.5px;color:var(--text-30)">Ingen arkiverede rapporter endnu. Send den første rapport ovenfor.</div>';
+      return;
+    }
+    list.innerHTML = rows.map(row => {
+      const date = new Date(row.sent_at).toLocaleString('da-DK');
+      const triggerLabel = row.trigger_type === 'auto' ? 'Auto' : 'Manuel';
+      const triggerClass = row.trigger_type === 'auto' ? 'chip-blue' : 'chip-green';
+      return `<div class="doc-item">
+        <div class="doc-info">
+          <div class="doc-label">${row.filename}</div>
+          <div class="doc-sub">${date} · ${row.suppliers_count} leverandører · ${row.audit_entries} poster · <span>${row.sent_to}</span></div>
+        </div>
+        <span class="chip ${triggerClass}" style="flex-shrink:0;margin-right:8px">${triggerLabel}</span>
+        <a href="/api/compliance/archive/${row.id}/pdf" class="btn btn-ghost" style="flex-shrink:0;padding:5px 12px;font-size:12px;text-decoration:none">Download</a>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    console.error('Compliance archive fejl:', e);
+  }
+}
+
+async function saveArchiveEmail() {
+  const email = document.getElementById('archive-email-input').value.trim();
+  const msg = document.getElementById('archive-settings-msg');
+  if (!email) { showMsg(msg, 'Indtast en gyldig email-adresse.', 'red'); return; }
+  try {
+    const r = await fetch('/api/compliance/settings', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archiveEmail: email })
+    });
+    if (r.ok) {
+      showMsg(msg, `Email gemt: ${email}. Daglig rapport sendes kl. 06:00.`, 'green');
+      const statusChip = document.getElementById('auto-archive-status');
+      if (statusChip) { statusChip.textContent = 'Aktiv'; statusChip.className = 'chip chip-green'; }
+    } else {
+      showMsg(msg, 'Fejl ved gemning. Prøv igen.', 'red');
+    }
+  } catch(e) { showMsg(msg, 'Netværksfejl: ' + e.message, 'red'); }
+}
+
+async function sendReportNow() {
+  const email = document.getElementById('archive-email-input').value.trim();
+  const msg = document.getElementById('archive-settings-msg');
+  if (!email) { showMsg(msg, 'Gem en arkiv-email først.', 'amber'); return; }
+  showMsg(msg, 'Genererer og sender rapport...', 'blue');
+  try {
+    const r = await fetch('/api/compliance/send-report', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archiveEmail: email })
+    });
+    const data = await r.json();
+    if (r.ok) {
+      const emailInfo = data.emailSent ? `Sendt til ${data.sentTo}` : `Arkiveret (email ikke konfigureret på server)`;
+      showMsg(msg, `Rapport arkiveret — ${data.suppliersCount} leverandører, ${data.auditEntries} poster. ${emailInfo}.`, 'green');
+      loadComplianceArchive();
+    } else {
+      showMsg(msg, data.error || 'Fejl ved sending.', 'red');
+    }
+  } catch(e) { showMsg(msg, 'Netværksfejl: ' + e.message, 'red'); }
+}
+
+function showMsg(el, text, type) {
+  if (!el) return;
+  const colors = { green:'var(--green)', red:'var(--red)', amber:'var(--amber)', blue:'var(--blue)' };
+  el.style.color = colors[type] || 'var(--text-80)';
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
+// Load compliance arkiv når export-siden åbnes
+const _origNavigateTo = navigateTo;
+function navigateTo(page) {
+  _origNavigateTo(page);
+  if (page === 'export') {
+    loadComplianceSettings();
+    loadComplianceArchive();
+  }
+}
+
+// Initial load af arkiv-indstillinger
+loadComplianceSettings();
 </script>
 </body>
 </html>
