@@ -5,6 +5,7 @@ const url = require('url');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
+const PDFDocument = require('pdfkit');
 const { pool, init } = require('./db');
 
 const app = express();
@@ -236,6 +237,99 @@ app.patch('/api/suppliers/:id', requireAuth, async (req, res) => {
 app.delete('/api/suppliers/:id', requireAuth, async (req, res) => {
   await pool.query('DELETE FROM suppliers WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
   res.json({ ok: true });
+});
+
+// ── PDF Export ───────────────────────────────────────────────
+app.get('/api/export/pdf', requireAuth, async (req, res) => {
+  try {
+    const suppliers = await pool.query(
+      'SELECT * FROM suppliers WHERE user_id = $1 ORDER BY added_at DESC',
+      [req.user.id]
+    );
+    const auditLog = await pool.query(
+      `SELECT a.*, s.name as supplier_name, s.cvr
+       FROM audit_log a
+       LEFT JOIN suppliers s ON s.id = a.supplier_id
+       WHERE a.user_id = $1
+       ORDER BY a.created_at DESC
+       LIMIT 100`,
+      [req.user.id]
+    );
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="chainguard-revisionsspor-${new Date().toISOString().split('T')[0]}.pdf"`);
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#1a1a2e').text('ChainGuard', { continued: true });
+    doc.fontSize(12).font('Helvetica').fillColor('#666').text('  —  Compliance Revisionsspor', { align: 'left' });
+    doc.moveDown(0.5);
+    doc.fontSize(10).fillColor('#888').text(`Genereret: ${new Date().toLocaleString('da-DK')}`, { align: 'left' });
+    doc.text(`Bruger: ${req.user.name} (${req.user.email})`);
+    doc.moveDown(1);
+
+    // Linje
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').stroke();
+    doc.moveDown(1);
+
+    // Leverandøroversigt
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a1a2e').text('Leverandøroversigt');
+    doc.moveDown(0.5);
+
+    if (suppliers.rows.length === 0) {
+      doc.fontSize(10).font('Helvetica').fillColor('#888').text('Ingen leverandører registreret.');
+    } else {
+      suppliers.rows.forEach((s, i) => {
+        const statusColor = s.status === 'compliant' ? '#00875A' : s.status === 'non-compliant' ? '#DE350B' : '#FF8B00';
+        const statusLabel = s.status === 'compliant' ? 'Godkendt' : s.status === 'non-compliant' ? 'Ikke godkendt' : 'Afventer';
+
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1a1a2e').text(`${i + 1}. ${s.name}`);
+        doc.fontSize(9).font('Helvetica').fillColor('#555')
+          .text(`CVR: ${s.cvr}  |  Branche: ${s.industry || '—'}  |  Adresse: ${s.address || '—'}`);
+        doc.fontSize(9).fillColor(statusColor).text(`Status: ${statusLabel}`);
+        if (s.notes) doc.fontSize(9).fillColor('#777').text(`Note: ${s.notes}`);
+        doc.fontSize(8).fillColor('#aaa').text(`Tilføjet: ${new Date(s.added_at).toLocaleString('da-DK')}`);
+        doc.moveDown(0.6);
+      });
+    }
+
+    doc.moveDown(0.5);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').stroke();
+    doc.moveDown(1);
+
+    // Audit log
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a1a2e').text('Revisionsspor');
+    doc.moveDown(0.5);
+
+    if (auditLog.rows.length === 0) {
+      doc.fontSize(10).font('Helvetica').fillColor('#888').text('Ingen handlinger registreret endnu.');
+    } else {
+      auditLog.rows.forEach(entry => {
+        const ts = new Date(entry.created_at).toLocaleString('da-DK');
+        doc.fontSize(9).font('Helvetica-Bold').fillColor('#333')
+          .text(`${ts}  —  ${entry.action}`, { continued: true });
+        doc.font('Helvetica').fillColor('#555')
+          .text(`  (${entry.supplier_name || '—'}, CVR: ${entry.cvr || '—'})`);
+        if (entry.details) doc.fontSize(8).fillColor('#888').text(`  ${entry.details}`);
+        doc.moveDown(0.3);
+      });
+    }
+
+    // Footer
+    doc.moveDown(2);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').stroke();
+    doc.moveDown(0.5);
+    doc.fontSize(8).fillColor('#aaa').text(
+      `Dette dokument er genereret automatisk af ChainGuard og indeholder et tidsstemplet revisionsspor. Dokumentet kan fremvises som dokumentation for due diligence i forbindelse med kædeansvar.`,
+      { align: 'center' }
+    );
+
+    doc.end();
+  } catch (e) {
+    console.error('PDF fejl:', e.message);
+    res.status(500).send('Kunne ikke generere PDF');
+  }
 });
 
 // ── Investor side ────────────────────────────────────────────

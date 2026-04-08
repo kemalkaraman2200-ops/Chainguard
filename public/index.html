@@ -2215,14 +2215,7 @@ document.querySelectorAll('.nav-link[data-page]').forEach(el=>{
 });
 
 function handleTopbarAction() {
-  const page = document.querySelector('.nav-link.active')?.dataset.page || 'dashboard';
-  if (page === 'export' || page === 'dashboard') {
-    navigateTo('export');
-  } else if (page === 'docbank') {
-    simulateUpload();
-  } else {
-    simulateExport('Compliance rapport', 'PDF');
-  }
+  window.location.href = '/api/export/pdf';
 }
 
 function handleTopbarPrimary() {
