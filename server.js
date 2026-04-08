@@ -3,7 +3,7 @@ const session = require('express-session');
 const https = require('https');
 const path = require('path');
 const url = require('url');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { pool, init } = require('./db');
 
 const app = express();
