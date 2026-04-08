@@ -327,8 +327,8 @@ app.get('/api/export/pdf', requireAuth, async (req, res) => {
 
     doc.end();
   } catch (e) {
-    console.error('PDF fejl:', e.message);
-    res.status(500).send('Kunne ikke generere PDF');
+    console.error('PDF fejl:', e.message, e.stack);
+    res.status(500).send('PDF fejl: ' + e.message);
   }
 });
 
