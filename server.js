@@ -272,11 +272,7 @@ app.get('/api/audit/:supplierId', requireAuth, async (req, res) => {
 app.use('/', requireAuth, express.static(path.join(__dirname, 'public')));
 
 // ── Start ────────────────────────────────────────────────────
-init().then(() => {
-  app.listen(PORT, () => {
-    console.log(`\n✅  ChainGuard kører på port ${PORT}\n`);
-  });
-}).catch(e => {
-  console.error('Database fejl:', e.message);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`\n✅  ChainGuard kører på port ${PORT}\n`);
+  init().catch(e => console.error('Database init fejl:', e.message));
 });
