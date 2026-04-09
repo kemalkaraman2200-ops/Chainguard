@@ -223,7 +223,7 @@ html.light .sidebar, html.light .topbar {
 .welcome-hero { display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,0.8fr);gap:16px;margin-bottom:18px; }
 .hero-copy {
   position:relative;overflow:hidden;padding:28px 30px;
-  background:linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,255,255,0.84));
+  background:var(--bg-card);
   border:1px solid var(--border-hi);border-radius:24px;
 }
 .hero-copy::after {
@@ -231,9 +231,11 @@ html.light .sidebar, html.light .topbar {
   background:radial-gradient(circle, rgba(37,99,235,0.10), transparent 68%);
   pointer-events:none;
 }
-.hero-kicker { font-size:11px;font-weight:800;color:#2563EB;letter-spacing:1.1px;text-transform:uppercase;margin-bottom:12px; }
-.hero-title { font-size:30px;font-weight:800;color:#1F2937;letter-spacing:-0.9px;line-height:1.15;max-width:12ch; }
-.hero-desc { margin-top:12px;font-size:15px;color:rgba(31,41,55,0.6);max-width:60ch;line-height:1.7; }
+.hero-kicker { font-size:11px;font-weight:800;color:var(--violet-l);letter-spacing:1.1px;text-transform:uppercase;margin-bottom:12px; }
+.hero-title { font-size:30px;font-weight:800;color:var(--text-100);letter-spacing:-0.9px;line-height:1.15;max-width:12ch; }
+.hero-desc { margin-top:12px;font-size:15px;color:var(--text-50);max-width:60ch;line-height:1.7; }
+.hero-dismiss { position:absolute;top:14px;right:14px;background:var(--bg-input);border:1px solid var(--border-med);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;color:var(--text-30);cursor:pointer;font-family:var(--font);transition:all 0.15s; }
+.hero-dismiss:hover { color:var(--text-80);border-color:var(--border-hi); }
 .hero-badges { display:flex;gap:10px;flex-wrap:wrap;margin-top:18px; }
 .hero-steps { display:grid;gap:12px; }
 .hero-step {
@@ -1148,6 +1150,7 @@ Aarhus Havnefront</div>
     <div class="page-view active" id="page-dashboard">
       <div class="welcome-hero">
         <div class="hero-copy">
+          <button class="hero-dismiss" onclick="dismissHero()">Skjul guide ✕</button>
           <div class="hero-kicker">Nem start</div>
           <div class="hero-title">Se hurtigt hvad der er fint, hvad der mangler, og hvad du skal gøre nu</div>
           <div class="hero-desc">Denne side er lavet til at kunne læses på få sekunder. Grøn betyder “alt ser godt ud”. Gul betyder “kig på det snart”. Rød betyder “det skal løses nu”. Klik på et firma for at se detaljer i et enkelt sprog.</div>
@@ -3783,6 +3786,23 @@ function showMsg(el, text, type) {
 
 // Initial load af arkiv-indstillinger
 loadComplianceSettings();
+
+// ── HERO DISMISS ──────────────────────────────────────────────
+function dismissHero() {
+  const hero = document.querySelector('.welcome-hero');
+  const strip = document.querySelector('.helper-strip');
+  if (hero) hero.style.display = 'none';
+  if (strip) strip.style.display = 'none';
+  try { localStorage.setItem('cg-hero-dismissed', '1'); } catch(e) {}
+}
+(function(){
+  if (localStorage.getItem('cg-hero-dismissed') === '1') {
+    const hero = document.querySelector('.welcome-hero');
+    const strip = document.querySelector('.helper-strip');
+    if (hero) hero.style.display = 'none';
+    if (strip) strip.style.display = 'none';
+  }
+})();
 </script>
 </body>
 </html>
