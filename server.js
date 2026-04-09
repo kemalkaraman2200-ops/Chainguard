@@ -45,17 +45,20 @@ function requireAuth(req, res, next) {
   next();
 }
 
-// ── Login side ──────────────────────────────────────────────
-app.get('/login', (req, res) => {
-  if (getUser(req)) return res.redirect('/');
-  res.send(`<!DOCTYPE html>
-<html lang="da">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ChainGuard — Log ind</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>
+async function requireSubscription(req, res, next) {
+  if (req.user.role === 'admin') return next();
+  try {
+    const result = await pool.query('SELECT subscription_status FROM users WHERE id=$1', [req.user.id]);
+    const status = result.rows[0]?.subscription_status;
+    if (status === 'active' || status === 'trialing') return next();
+    return res.redirect('/pricing?upgrade=1');
+  } catch (e) {
+    return next();
+  }
+}
+
+// ── Shared auth page styles ──────────────────────────────────
+const AUTH_STYLES = `
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: #080C20; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; -webkit-font-smoothing: antialiased; }
   .orb-layer { position:fixed;inset:0;pointer-events:none;overflow:hidden; }
@@ -75,7 +78,22 @@ app.get('/login', (req, res) => {
   button { width:100%;background:linear-gradient(135deg,#7C5CFC,#635BFF);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14.5px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:4px;box-shadow:0 4px 20px rgba(124,92,252,0.4);transition:opacity 0.2s; }
   button:hover { opacity:0.88; }
   .error { background:rgba(255,77,106,0.12);border:1px solid rgba(255,77,106,0.28);color:#FF4D6A;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:18px; }
-</style>
+  .switch-link { text-align:center;margin-top:22px;font-size:13px;color:rgba(255,255,255,0.35); }
+  .switch-link a { color:rgba(124,92,252,0.9);text-decoration:none;font-weight:600; }
+  .switch-link a:hover { color:#A78BFA; }
+`;
+
+// ── Login side ──────────────────────────────────────────────
+app.get('/login', (req, res) => {
+  if (getUser(req)) return res.redirect('/');
+  res.send(`<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChainGuard — Log ind</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>${AUTH_STYLES}</style>
 </head>
 <body>
 <div class="orb-layer"><div class="orb orb-1"></div><div class="orb orb-2"></div></div>
@@ -94,9 +112,77 @@ app.get('/login', (req, res) => {
     <input type="password" name="password" required placeholder="••••••••">
     <button type="submit">Log ind</button>
   </form>
+  <div class="switch-link">Ny bruger? <a href="/register">Opret gratis konto →</a></div>
 </div>
 </body>
 </html>`);
+});
+
+// ── Opret konto ─────────────────────────────────────────────
+app.get('/register', (req, res) => {
+  if (getUser(req)) return res.redirect('/');
+  const errors = {
+    exists: 'Der findes allerede en konto med denne email.',
+    mismatch: 'Adgangskoderne stemmer ikke overens.',
+    short: 'Adgangskoden skal være mindst 8 tegn.',
+    fail: 'Noget gik galt — prøv igen.',
+  };
+  const err = req.query.error ? (errors[req.query.error] || errors.fail) : null;
+  res.send(`<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChainGuard — Opret konto</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>${AUTH_STYLES}</style>
+</head>
+<body>
+<div class="orb-layer"><div class="orb orb-1"></div><div class="orb orb-2"></div></div>
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">🛡</div>
+    <div><div class="logo-text">ChainGuard</div><div class="logo-sub">Compliance Platform</div></div>
+  </div>
+  <h1>Opret konto</h1>
+  <p class="subtitle">Første 30 dage gratis — ingen binding</p>
+  ${err ? `<div class="error">${err}</div>` : ''}
+  <form method="POST" action="/register">
+    <label>Navn</label>
+    <input type="text" name="name" required autofocus placeholder="Dit fulde navn">
+    <label>Email</label>
+    <input type="email" name="email" required placeholder="din@email.dk">
+    <label>Adgangskode</label>
+    <input type="password" name="password" required placeholder="Mindst 8 tegn">
+    <label>Bekræft adgangskode</label>
+    <input type="password" name="confirm" required placeholder="Gentag adgangskode">
+    <button type="submit">Opret konto og vælg plan</button>
+  </form>
+  <div class="switch-link">Har du allerede en konto? <a href="/login">Log ind →</a></div>
+</div>
+</body>
+</html>`);
+});
+
+app.post('/register', async (req, res) => {
+  const { name, email, password, confirm } = req.body;
+  if (!password || password.length < 8) return res.redirect('/register?error=short');
+  if (password !== confirm) return res.redirect('/register?error=mismatch');
+  try {
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.trim().toLowerCase()]);
+    if (existing.rows.length > 0) return res.redirect('/register?error=exists');
+    const hash = await bcrypt.hash(password, 12);
+    const result = await pool.query(
+      `INSERT INTO users (email, password, name, role) VALUES ($1,$2,$3,'user') RETURNING *`,
+      [email.trim().toLowerCase(), hash, name.trim()]
+    );
+    const token = signToken(result.rows[0]);
+    res.cookie('cg_token', token, { httpOnly: true, maxAge: 8 * 60 * 60 * 1000 });
+    res.redirect('/pricing');
+  } catch (e) {
+    console.error('Register fejl:', e.message);
+    res.redirect('/register?error=fail');
+  }
 });
 
 app.post('/login', async (req, res) => {
@@ -715,6 +801,7 @@ h1{font-size:42px;font-weight:800;letter-spacing:-1.5px;margin-bottom:14px;line-
   </div>
 </nav>
 <div class="hero">
+  ${req.query.upgrade ? '<div style="display:inline-block;background:rgba(255,173,13,0.12);border:1px solid rgba(255,173,13,0.3);color:#FFAD0D;padding:10px 22px;border-radius:99px;font-size:13px;font-weight:600;margin-bottom:20px;">Vælg et abonnement for at tilgå platformen</div>' : ''}
   <div class="badge">Simpel og transparent prissætning</div>
   <h1>Vælg den plan<br>der passer dig</h1>
   <p class="sub">Alt hvad du behøver for at dokumentere kædeansvar og overholde EU-krav</p>
@@ -892,8 +979,8 @@ h1 { font-size:28px;font-weight:800;letter-spacing:-0.5px;margin-bottom:8px; }
 </html>`);
 });
 
-// ── Dashboard (kræver login) ─────────────────────────────────
-app.use('/', requireAuth, express.static(path.join(__dirname, 'public')));
+// ── Dashboard (kræver login + aktivt abonnement) ─────────────
+app.use('/', requireAuth, requireSubscription, express.static(path.join(__dirname, 'public')));
 
 // ── Global fejlhåndtering ────────────────────────────────────
 app.use((err, req, res, next) => {
