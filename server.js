@@ -218,14 +218,17 @@ app.post('/login', async (req, res) => {
 // MIDLERTIDIG DEBUG — slet efter test
 app.get('/debug-db', async (req, res) => {
   const { Pool: TestPool } = require('pg');
+  const dns = require('dns').promises;
   const out = {
     DATABASE_URL: !!process.env.DATABASE_URL,
+    URL_PREVIEW: process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/:([^:@]+)@/, ':***@').substring(0,60) : null,
     PGHOST: process.env.PGHOST || null,
     PGPORT: process.env.PGPORT || null,
     PGDATABASE: process.env.PGDATABASE || null,
     PGUSER: process.env.PGUSER || null,
     PGPASSWORD: !!process.env.PGPASSWORD
   };
+  try { const a = await dns.lookup('postgres.railway.internal'); out.dns_postgres = a.address; } catch(e) { out.dns_postgres = 'ENOTFOUND'; }
 
   if (process.env.DATABASE_URL) {
     // Test uden SSL
