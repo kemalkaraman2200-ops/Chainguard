@@ -228,10 +228,18 @@ app.get('/debug-db', async (req, res) => {
     PGUSER: process.env.PGUSER || null,
     PGPASSWORD: !!process.env.PGPASSWORD
   };
-  try { const a = await dns.lookup('postgres.railway.internal'); out.lookup = a.address; } catch(e) { out.lookup = e.message; }
-  try { const r = await dns.resolve4('postgres.railway.internal'); out.resolve4 = r; } catch(e) { out.resolve4 = e.message; }
-  try { const r = await dns.resolve6('postgres.railway.internal'); out.resolve6 = r; } catch(e) { out.resolve6 = e.message; }
-  try { const a2 = await dns.lookup('postgres'); out.lookup_short = a2.address; } catch(e) { out.lookup_short = e.message; }
+  // Test raw TCP til public proxy
+  await new Promise(resolve => {
+    const net = require('net');
+    const s = net.connect(45453, 'crossover.proxy.rlwy.net');
+    let data = '';
+    s.setTimeout(5000);
+    s.on('connect', () => { out.tcp_connect = 'OK'; });
+    s.on('data', d => { data += d.toString('hex'); });
+    s.on('timeout', () => { out.tcp_data = data || 'ingen data'; out.tcp_end = 'timeout'; s.destroy(); resolve(); });
+    s.on('error', e => { out.tcp_error = e.message; resolve(); });
+    s.on('close', () => { out.tcp_data = data || 'ingen data'; resolve(); });
+  });
 
   if (process.env.DATABASE_URL) {
     // Test uden SSL
