@@ -11,7 +11,7 @@ const poolConfig = process.env.DATABASE_URL
       database: process.env.PGDATABASE,
       user: process.env.PGUSER,
       password: process.env.PGPASSWORD,
-      ssl: false
+      ssl: process.env.PGHOST && process.env.PGHOST.includes('railway.internal') ? false : { rejectUnauthorized: false }
     };
 
 const pool = new Pool({

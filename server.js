@@ -236,7 +236,7 @@ app.get('/debug-db', async (req, res) => {
         user: process.env.PGUSER,
         password: process.env.PGPASSWORD,
         ssl: false,
-        connectionTimeoutMillis: 5000
+        connectionTimeoutMillis: 30000
       });
       const r = await p.query('SELECT NOW() as now');
       await p.end();
