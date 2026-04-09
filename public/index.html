@@ -2060,12 +2060,18 @@ document.getElementById('dashboard-supplier-tbody').innerHTML = SUPPLIERS.map(s 
 document.getElementById('all-suppliers-tbody').innerHTML     = SUPPLIERS.map(s => renderSupplierRow(s,true)).join('');
 
 // Load gemte leverandører fra databasen
-fetch('/api/suppliers').then(r => r.json()).then(rows => {
+fetch('/api/suppliers', { credentials: 'same-origin' }).then(r => r.json()).then(rows => {
+  // Fjern tidligere DB-leverandører (id >= 10000) for at undgå duplikater ved genindlæsning
+  const demoOnly = SUPPLIERS.filter(s => s.id < 10000);
+  SUPPLIERS.length = 0;
+  demoOnly.forEach(s => SUPPLIERS.push(s));
+
   rows.forEach(row => {
-    if(SUPPLIERS.find(s => s.cvr === row.cvr)) return; // undgå duplikater
     const risk = row.status === 'compliant' ? 'low' : row.status === 'non-compliant' ? 'high' : 'medium';
+    // Brug id + 10000 for at undgå konflikt med demo-ID'er 1-6
     SUPPLIERS.push({
-      id: row.id,
+      id: row.id + 10000,
+      dbId: row.id,
       name: row.name,
       meta: `🇩🇰 Danmark · CVR ${row.cvr}`,
       type: row.industry || 'Andet',
@@ -2077,8 +2083,9 @@ fetch('/api/suppliers').then(r => r.json()).then(rows => {
       status: row.status === 'compliant' ? 'Godkendt' : row.status === 'non-compliant' ? 'Blokeret' : 'Afventer',
       statusClass: {low:'s-green',medium:'s-amber',high:'s-red'}[risk],
       cvr: row.cvr,
-      address: row.address,
+      address: row.address || '—',
       employees: row.employees ? String(row.employees) : '—',
+      notes: row.notes || '',
       since: '—', contact: '—', docs: [], log: [], monitoring: []
     });
   });
@@ -2987,7 +2994,7 @@ function finalizeOnboarding() {
   SUPPLIERS.push(newSupplier);
   _lastAddedId = newSupplier.id;
 
-  // Gem i database
+  // Gem i database og opdater ID
   fetch('/api/suppliers', {
     method: 'POST',
     credentials: 'same-origin',
@@ -3002,8 +3009,13 @@ function finalizeOnboarding() {
       status: risk === 'low' ? 'compliant' : risk === 'medium' ? 'pending' : 'non-compliant',
       notes: obForm.note || ''
     })
-  }).then(r => {
-    if(!r.ok) console.error('Gem fejl:', r.status);
+  }).then(r => r.json()).then(saved => {
+    // Opdater ID til DB-id + 10000 så det matcher genindlæsning
+    const idx = SUPPLIERS.findIndex(s => s.id === newSupplier.id);
+    if(idx !== -1 && saved.id) {
+      SUPPLIERS[idx].id = saved.id + 10000;
+      SUPPLIERS[idx].dbId = saved.id;
+    }
   }).catch(e => console.error('Kunne ikke gemme leverandør:', e));
 
   // Update all tables + counters
