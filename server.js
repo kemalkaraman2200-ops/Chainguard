@@ -218,14 +218,26 @@ app.post('/login', async (req, res) => {
 // MIDLERTIDIG DEBUG — slet efter test
 app.get('/debug-db', async (req, res) => {
   const { Pool: TestPool } = require('pg');
-  const tp = new TestPool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  const url = process.env.DATABASE_URL;
+  const out = { url_set: !!url, url_preview: url ? url.substring(0,30) : null };
+
+  // Test 1: uden SSL
   try {
-    const r = await tp.query('SELECT NOW() as now, current_database() as db');
-    await tp.end();
-    res.json({ ok: true, now: r.rows[0].now, db: r.rows[0].db, url_set: !!process.env.DATABASE_URL });
-  } catch(e) {
-    res.json({ ok: false, error: e.message, url_set: !!process.env.DATABASE_URL });
-  }
+    const p1 = new TestPool({ connectionString: url, ssl: false, connectionTimeoutMillis: 5000 });
+    const r = await p1.query('SELECT NOW() as now');
+    await p1.end();
+    out.no_ssl = 'OK - ' + r.rows[0].now;
+  } catch(e) { out.no_ssl = 'FEJL: ' + e.message; }
+
+  // Test 2: med SSL rejectUnauthorized false
+  try {
+    const p2 = new TestPool({ connectionString: url, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000 });
+    const r = await p2.query('SELECT NOW() as now');
+    await p2.end();
+    out.with_ssl = 'OK - ' + r.rows[0].now;
+  } catch(e) { out.with_ssl = 'FEJL: ' + e.message; }
+
+  res.json(out);
 });
 
 app.post('/debug-login', async (req, res) => {
