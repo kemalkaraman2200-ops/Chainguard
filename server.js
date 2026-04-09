@@ -228,17 +228,24 @@ app.get('/debug-db', async (req, res) => {
     PGUSER: process.env.PGUSER || null,
     PGPASSWORD: !!process.env.PGPASSWORD
   };
-  // Test raw TCP til public proxy
+  // Test PostgreSQL SSL handshake manuelt
   await new Promise(resolve => {
     const net = require('net');
     const s = net.connect(45453, 'crossover.proxy.rlwy.net');
     let data = '';
     s.setTimeout(5000);
-    s.on('connect', () => { out.tcp_connect = 'OK'; });
-    s.on('data', d => { data += d.toString('hex'); });
-    s.on('timeout', () => { out.tcp_data = data || 'ingen data'; out.tcp_end = 'timeout'; s.destroy(); resolve(); });
-    s.on('error', e => { out.tcp_error = e.message; resolve(); });
-    s.on('close', () => { out.tcp_data = data || 'ingen data'; resolve(); });
+    s.on('connect', () => {
+      out.tcp_connect = 'OK';
+      // Send PostgreSQL SSL request
+      const buf = Buffer.alloc(8);
+      buf.writeInt32BE(8, 0);
+      buf.writeInt32BE(80877103, 4);
+      s.write(buf);
+    });
+    s.on('data', d => { data += d.toString('utf8'); });
+    s.on('timeout', () => { out.pg_response = data || 'ingen data'; out.tcp_end = 'timeout'; s.destroy(); resolve(); });
+    s.on('error', e => { out.pg_response = data || 'ingen data'; out.tcp_error = e.message; resolve(); });
+    s.on('close', () => { if (!out.pg_response) out.pg_response = data || 'ingen data'; resolve(); });
   });
 
   if (process.env.DATABASE_URL) {
