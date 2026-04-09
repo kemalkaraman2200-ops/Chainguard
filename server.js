@@ -228,12 +228,21 @@ app.get('/debug-db', async (req, res) => {
   };
 
   if (process.env.DATABASE_URL) {
+    // Test uden SSL
     try {
-      const p = new TestPool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 30000 });
+      const p = new TestPool({ connectionString: process.env.DATABASE_URL, ssl: false, connectionTimeoutMillis: 30000 });
       const r = await p.query('SELECT NOW() as now');
       await p.end();
-      out.result = 'OK via DATABASE_URL: ' + r.rows[0].now;
-    } catch(e) { out.result = 'FEJL via DATABASE_URL: ' + e.message; }
+      out.no_ssl = 'OK: ' + r.rows[0].now;
+    } catch(e) { out.no_ssl = 'FEJL: ' + e.message; }
+    // Test med SSL
+    try {
+      const p2 = new TestPool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 30000 });
+      const r2 = await p2.query('SELECT NOW() as now');
+      await p2.end();
+      out.with_ssl = 'OK: ' + r2.rows[0].now;
+    } catch(e) { out.with_ssl = 'FEJL: ' + e.message; }
+    out.result = 'done';
   } else if (process.env.PGHOST) {
     try {
       const p = new TestPool({ host: process.env.PGHOST, port: parseInt(process.env.PGPORT||'5432'), database: process.env.PGDATABASE, user: process.env.PGUSER, password: process.env.PGPASSWORD, ssl: false, connectionTimeoutMillis: 30000 });
