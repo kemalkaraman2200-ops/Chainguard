@@ -199,10 +199,11 @@ app.post('/login', async (req, res) => {
 
   // Database auth
   try {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
     const user = result.rows[0];
     if (!user) return res.redirect('/login?error=1');
-    const match = await bcrypt.compare(password, user.password);
+    const match = await bcrypt.compare(password, user.password.trim());
     if (!match) return res.redirect('/login?error=1');
     const token = signToken(user);
     res.cookie('cg_token', token, { httpOnly: true, maxAge: 8 * 60 * 60 * 1000 });
@@ -211,6 +212,25 @@ app.post('/login', async (req, res) => {
   } catch (e) {
     console.error('Login fejl:', e.message);
     res.redirect('/login?error=1');
+  }
+});
+
+// MIDLERTIDIG DEBUG — slet efter test
+app.post('/debug-login', async (req, res) => {
+  const { email, password } = req.body;
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  try {
+    const result = await pool.query('SELECT id, email, length(password) as pw_len, left(password,10) as pw_start, role, subscription_status FROM users WHERE email = $1', [normalizedEmail]);
+    if (!result.rows[0]) {
+      return res.json({ found: false, tried: normalizedEmail });
+    }
+    const user = result.rows[0];
+    const fullResult = await pool.query('SELECT password FROM users WHERE email = $1', [normalizedEmail]);
+    const hash = fullResult.rows[0].password;
+    const match = await bcrypt.compare(password, hash.trim());
+    res.json({ found: true, user, pw_len: hash.length, pw_trimmed_len: hash.trim().length, match });
+  } catch (e) {
+    res.json({ error: e.message });
   }
 });
 
