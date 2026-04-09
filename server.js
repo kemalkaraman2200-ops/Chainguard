@@ -947,18 +947,21 @@ h1 { font-size:28px;font-weight:800;letter-spacing:-0.5px;margin-bottom:8px; }
   <h1>Investor Overblik</h1>
   <p class="sub">Fortroligt dokument — kun til investorer</p>
   <div class="kpi-grid">
-    <div class="kpi"><div class="kpi-val green">3</div><div class="kpi-label">Betalende kunder</div><div class="kpi-sub">Mål: 20 inden Q3 2026</div></div>
-    <div class="kpi"><div class="kpi-val violet">499 kr</div><div class="kpi-label">Pris pr. måned</div><div class="kpi-sub">Per virksomhed</div></div>
-    <div class="kpi"><div class="kpi-val blue">1.497 kr</div><div class="kpi-label">MRR</div><div class="kpi-sub">Monthly Recurring Revenue</div></div>
-    <div class="kpi"><div class="kpi-val amber">~50.000</div><div class="kpi-label">Adresserbart marked</div><div class="kpi-sub">Danske entreprenører</div></div>
+    <div class="kpi"><div class="kpi-val green">0</div><div class="kpi-label">Betalende kunder</div><div class="kpi-sub">Mål: 10 inden Q3 2026</div></div>
+    <div class="kpi"><div class="kpi-val violet">999–2.499 kr</div><div class="kpi-label">Pris pr. måned</div><div class="kpi-sub">Basis / Pro plan</div></div>
+    <div class="kpi"><div class="kpi-val blue">0 kr</div><div class="kpi-label">MRR</div><div class="kpi-sub">Monthly Recurring Revenue</div></div>
+    <div class="kpi"><div class="kpi-val amber">~50.000</div><div class="kpi-label">Adresserbart marked</div><div class="kpi-sub">Danske virksomheder</div></div>
   </div>
   <div class="card">
     <h2>Forretningsmodel</h2>
     <div class="row"><span class="row-label">Model</span><span class="row-val">SaaS — månedligt abonnement</span></div>
-    <div class="row"><span class="row-label">Pris</span><span class="row-val">499 kr/md · første måned gratis</span></div>
-    <div class="row"><span class="row-label">Målgruppe</span><span class="row-val">Hoved- og totalentreprenører i Danmark</span></div>
-    <div class="row"><span class="row-label">Problem</span><span class="row-val">Kommuner kræver kædeansvarsdokumentation</span></div>
-    <div class="row"><span class="row-label">Løsning</span><span class="row-val">Automatisk CVR-tjek + revisionsspor</span></div>
+    <div class="row"><span class="row-label">Basis plan</span><span class="row-val">999 kr/md · 0–20 mio kr omsætning</span></div>
+    <div class="row"><span class="row-label">Pro plan</span><span class="row-val">2.499 kr/md · 20–100 mio kr omsætning</span></div>
+    <div class="row"><span class="row-label">Heavy plan</span><span class="row-val">Skræddersyet · 100+ mio kr omsætning</span></div>
+    <div class="row"><span class="row-label">Prøveperiode</span><span class="row-val">30 dage gratis — ingen binding</span></div>
+    <div class="row"><span class="row-label">Målgruppe</span><span class="row-val">Virksomheder med leverandørkæder i Danmark</span></div>
+    <div class="row"><span class="row-label">Problem</span><span class="row-val">EU kædeansvarsdirektiv kræver dokumentation</span></div>
+    <div class="row"><span class="row-label">Løsning</span><span class="row-val">Automatisk CVR-tjek, revisionsspor + PDF-arkiv</span></div>
     <div class="row"><span class="row-label">Status</span><span class="row-val"><span class="tag tag-green">Live</span></span></div>
   </div>
   <div class="card">
