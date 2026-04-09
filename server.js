@@ -218,24 +218,33 @@ app.post('/login', async (req, res) => {
 // MIDLERTIDIG DEBUG — slet efter test
 app.get('/debug-db', async (req, res) => {
   const { Pool: TestPool } = require('pg');
-  const url = process.env.DATABASE_URL;
-  const out = { url_set: !!url, url_preview: url ? url.substring(0,30) : null };
+  const out = {
+    DATABASE_URL: !!process.env.DATABASE_URL,
+    PGHOST: process.env.PGHOST || null,
+    PGPORT: process.env.PGPORT || null,
+    PGDATABASE: process.env.PGDATABASE || null,
+    PGUSER: process.env.PGUSER || null,
+    PGPASSWORD: !!process.env.PGPASSWORD
+  };
 
-  // Test 1: uden SSL
-  try {
-    const p1 = new TestPool({ connectionString: url, ssl: false, connectionTimeoutMillis: 5000 });
-    const r = await p1.query('SELECT NOW() as now');
-    await p1.end();
-    out.no_ssl = 'OK - ' + r.rows[0].now;
-  } catch(e) { out.no_ssl = 'FEJL: ' + e.message; }
-
-  // Test 2: med SSL rejectUnauthorized false
-  try {
-    const p2 = new TestPool({ connectionString: url, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000 });
-    const r = await p2.query('SELECT NOW() as now');
-    await p2.end();
-    out.with_ssl = 'OK - ' + r.rows[0].now;
-  } catch(e) { out.with_ssl = 'FEJL: ' + e.message; }
+  if (process.env.PGHOST) {
+    try {
+      const p = new TestPool({
+        host: process.env.PGHOST,
+        port: parseInt(process.env.PGPORT || '5432'),
+        database: process.env.PGDATABASE,
+        user: process.env.PGUSER,
+        password: process.env.PGPASSWORD,
+        ssl: false,
+        connectionTimeoutMillis: 5000
+      });
+      const r = await p.query('SELECT NOW() as now');
+      await p.end();
+      out.result = 'OK: ' + r.rows[0].now;
+    } catch(e) { out.result = 'FEJL: ' + e.message; }
+  } else {
+    out.result = 'PGHOST ikke sat';
+  }
 
   res.json(out);
 });
