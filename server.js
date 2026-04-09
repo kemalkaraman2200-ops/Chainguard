@@ -227,23 +227,22 @@ app.get('/debug-db', async (req, res) => {
     PGPASSWORD: !!process.env.PGPASSWORD
   };
 
-  if (process.env.PGHOST) {
+  if (process.env.DATABASE_URL) {
     try {
-      const p = new TestPool({
-        host: process.env.PGHOST,
-        port: parseInt(process.env.PGPORT || '5432'),
-        database: process.env.PGDATABASE,
-        user: process.env.PGUSER,
-        password: process.env.PGPASSWORD,
-        ssl: false,
-        connectionTimeoutMillis: 30000
-      });
+      const p = new TestPool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 30000 });
       const r = await p.query('SELECT NOW() as now');
       await p.end();
-      out.result = 'OK: ' + r.rows[0].now;
-    } catch(e) { out.result = 'FEJL: ' + e.message; }
+      out.result = 'OK via DATABASE_URL: ' + r.rows[0].now;
+    } catch(e) { out.result = 'FEJL via DATABASE_URL: ' + e.message; }
+  } else if (process.env.PGHOST) {
+    try {
+      const p = new TestPool({ host: process.env.PGHOST, port: parseInt(process.env.PGPORT||'5432'), database: process.env.PGDATABASE, user: process.env.PGUSER, password: process.env.PGPASSWORD, ssl: false, connectionTimeoutMillis: 30000 });
+      const r = await p.query('SELECT NOW() as now');
+      await p.end();
+      out.result = 'OK via PGHOST: ' + r.rows[0].now;
+    } catch(e) { out.result = 'FEJL via PGHOST: ' + e.message; }
   } else {
-    out.result = 'PGHOST ikke sat';
+    out.result = 'Ingen DB config';
   }
 
   res.json(out);
