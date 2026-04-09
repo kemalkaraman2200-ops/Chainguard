@@ -220,17 +220,24 @@ app.post('/debug-login', async (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = (email || '').trim().toLowerCase();
   try {
-    const result = await pool.query('SELECT id, email, length(password) as pw_len, left(password,10) as pw_start, role, subscription_status FROM users WHERE email = $1', [normalizedEmail]);
+    const result = await pool.query(
+      "SELECT id, email, role, subscription_status, length(password::text) as pw_len FROM users WHERE email = $1",
+      [normalizedEmail]
+    );
     if (!result.rows[0]) {
       return res.json({ found: false, tried: normalizedEmail });
     }
     const user = result.rows[0];
-    const fullResult = await pool.query('SELECT password FROM users WHERE email = $1', [normalizedEmail]);
-    const hash = fullResult.rows[0].password;
-    const match = await bcrypt.compare(password, hash.trim());
-    res.json({ found: true, user, pw_len: hash.length, pw_trimmed_len: hash.trim().length, match });
+    const hashResult = await pool.query(
+      "SELECT password::text as hash FROM users WHERE email = $1",
+      [normalizedEmail]
+    );
+    const hash = hashResult.rows[0].hash;
+    let match = false;
+    try { match = await bcrypt.compare(password, hash); } catch(be) { return res.json({ found: true, user, hash_preview: hash ? hash.substring(0,10) : null, bcrypt_error: be.message }); }
+    res.json({ found: true, user, pw_len: hash ? hash.length : 0, match });
   } catch (e) {
-    res.json({ error: e.message });
+    res.json({ error: e.message, stack: e.stack });
   }
 });
 
