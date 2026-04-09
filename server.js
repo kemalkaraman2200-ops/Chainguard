@@ -228,10 +228,10 @@ app.get('/debug-db', async (req, res) => {
     PGUSER: process.env.PGUSER || null,
     PGPASSWORD: !!process.env.PGPASSWORD
   };
-  try { const a = await dns.lookup('postgres.railway.internal'); out.dns_postgres = a.address; } catch(e) { out.dns_postgres = e.message; }
-  try { const a2 = await dns.lookup('google.com'); out.dns_google = a2.address; } catch(e) { out.dns_google = e.message; }
-  const fs = require('fs');
-  try { out.resolv = fs.readFileSync('/etc/resolv.conf','utf8').trim(); } catch(e) { out.resolv = e.message; }
+  try { const a = await dns.lookup('postgres.railway.internal'); out.lookup = a.address; } catch(e) { out.lookup = e.message; }
+  try { const r = await dns.resolve4('postgres.railway.internal'); out.resolve4 = r; } catch(e) { out.resolve4 = e.message; }
+  try { const r = await dns.resolve6('postgres.railway.internal'); out.resolve6 = r; } catch(e) { out.resolve6 = e.message; }
+  try { const a2 = await dns.lookup('postgres'); out.lookup_short = a2.address; } catch(e) { out.lookup_short = e.message; }
 
   if (process.env.DATABASE_URL) {
     // Test uden SSL
