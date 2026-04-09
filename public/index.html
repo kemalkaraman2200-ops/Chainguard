@@ -221,6 +221,7 @@ html.light .sidebar, html.light .topbar {
 
 /* ── FRIENDLY HERO ── */
 .welcome-hero { display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,0.8fr);gap:16px;margin-bottom:18px; }
+.hero-hidden .welcome-hero, .hero-hidden .helper-strip { display:none !important; }
 .hero-copy {
   position:relative;overflow:hidden;padding:28px 30px;
   background:var(--bg-card);
@@ -798,6 +799,7 @@ html.light tbody tr:hover td { background:rgba(124,92,252,0.04); }
   .hero-title { font-size:24px;max-width:none; }
 }
 </style>
+<script>if(localStorage.getItem('cg-hero-dismissed')==='1')document.documentElement.classList.add('hero-hidden');</script>
 </head>
 <body>
 
@@ -3789,20 +3791,9 @@ loadComplianceSettings();
 
 // ── HERO DISMISS ──────────────────────────────────────────────
 function dismissHero() {
-  const hero = document.querySelector('.welcome-hero');
-  const strip = document.querySelector('.helper-strip');
-  if (hero) hero.style.display = 'none';
-  if (strip) strip.style.display = 'none';
+  document.documentElement.classList.add('hero-hidden');
   try { localStorage.setItem('cg-hero-dismissed', '1'); } catch(e) {}
 }
-(function(){
-  if (localStorage.getItem('cg-hero-dismissed') === '1') {
-    const hero = document.querySelector('.welcome-hero');
-    const strip = document.querySelector('.helper-strip');
-    if (hero) hero.style.display = 'none';
-    if (strip) strip.style.display = 'none';
-  }
-})();
 </script>
 </body>
 </html>
