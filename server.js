@@ -216,6 +216,18 @@ app.post('/login', async (req, res) => {
 });
 
 // MIDLERTIDIG DEBUG — slet efter test
+app.get('/debug-db', async (req, res) => {
+  const { Pool: TestPool } = require('pg');
+  const tp = new TestPool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  try {
+    const r = await tp.query('SELECT NOW() as now, current_database() as db');
+    await tp.end();
+    res.json({ ok: true, now: r.rows[0].now, db: r.rows[0].db, url_set: !!process.env.DATABASE_URL });
+  } catch(e) {
+    res.json({ ok: false, error: e.message, url_set: !!process.env.DATABASE_URL });
+  }
+});
+
 app.post('/debug-login', async (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = (email || '').trim().toLowerCase();
