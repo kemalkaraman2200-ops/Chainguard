@@ -1501,7 +1501,7 @@ Aarhus Havnefront</div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Underentreprenør</th><th>Land</th><th>Aktivitet</th><th>Ansatte på site</th><th>Tilladelse</th><th>Status</th></tr></thead>
-            <tbody>
+            <tbody id="subcontractors-tbody">
               <tr><td><div class="td-name">Kaunas Works UAB</div><div class="td-meta">Litauen · Tier 3</div></td><td><span class="tag">🇱🇹 LT</span></td><td><span class="tag">Betonarbejde</span></td><td style="color:var(--text-100);font-weight:700">12</td><td><span class="chip chip-red">Mangler</span></td><td><span class="status s-red">Blokeret</span></td></tr>
               <tr><td><div class="td-name">Vilnius Steel OÜ</div><div class="td-meta">Estland · Tier 3</div></td><td><span class="tag">🇪🇪 EE</span></td><td><span class="tag">Armering</span></td><td style="color:var(--text-100);font-weight:700">6</td><td><span class="chip chip-amber">Under review</span></td><td><span class="status s-amber">Afventer</span></td></tr>
               <tr><td><div class="td-name">LatBuild SIA</div><div class="td-meta">Letland · Tier 3</div></td><td><span class="tag">🇱🇻 LV</span></td><td><span class="tag">Transport</span></td><td style="color:var(--text-100);font-weight:700">3</td><td><span class="chip chip-green">Godkendt</span></td><td><span class="status s-green">Aktiv</span></td></tr>
@@ -2288,7 +2288,7 @@ function handleTopbarPrimary() {
   } else if (page === 'compliance-check') {
     runComplianceCheck();
   } else if (page === 'subcontractors') {
-    showToast('Tilknyt underentreprenør', 'Funktionen er under implementering. CVR-søgning kan bruges til oprettelse.', 'blue');
+    openAddSubcontractorModal();
   } else {
     showToast('Handling udført', 'Handlingen er registreret i systemet.', 'green');
   }
@@ -3624,6 +3624,104 @@ function sendEsgSchemas() {
 }
 
 document.querySelector('#page-esg .btn-primary')?.addEventListener('click', openEsgModal);
+
+// ── TILFØJ UNDERENTREPRENØR MODAL ─────────────────────────────
+(function(){
+  const COUNTRIES = [
+    { code:'DK', name:'Danmark',  flag:'🇩🇰' },
+    { code:'LT', name:'Litauen',  flag:'🇱🇹' },
+    { code:'LV', name:'Letland',  flag:'🇱🇻' },
+    { code:'EE', name:'Estland',  flag:'🇪🇪' },
+    { code:'PL', name:'Polen',    flag:'🇵🇱' },
+    { code:'DE', name:'Tyskland', flag:'🇩🇪' },
+    { code:'SE', name:'Sverige',  flag:'🇸🇪' },
+    { code:'NO', name:'Norge',    flag:'🇳🇴' },
+    { code:'ES', name:'Spanien',  flag:'🇪🇸' },
+    { code:'IT', name:'Italien',  flag:'🇮🇹' },
+  ];
+  const html = `
+  <div class="simple-modal-overlay" id="subcon-modal-overlay">
+    <div class="simple-modal">
+      <div class="sm-head">
+        <span class="sm-title">Tilføj firma i kæden</span>
+        <button class="drawer-close" onclick="document.getElementById('subcon-modal-overlay').classList.remove('open')">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+        </button>
+      </div>
+      <div class="sm-body">
+        <div><div class="sm-label">Firmanavn</div><input class="sm-input" id="subcon-name-input" placeholder="F.eks. Kaunas Works UAB"/></div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1"><div class="sm-label">Land</div>
+            <select class="sm-select" id="subcon-country-select">
+              ${COUNTRIES.map(c=>`<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div style="flex:1"><div class="sm-label">Ansatte på site</div>
+            <input class="sm-input" id="subcon-employees-input" type="number" min="0" placeholder="0"/>
+          </div>
+        </div>
+        <div><div class="sm-label">Aktivitet</div>
+          <input class="sm-input" id="subcon-activity-input" placeholder="F.eks. Betonarbejde, Armering, Transport"/>
+        </div>
+        <div><div class="sm-label">Tilladelse</div>
+          <select class="sm-select" id="subcon-permit-select">
+            <option value="missing">Mangler</option>
+            <option value="review" selected>Under review</option>
+            <option value="approved">Godkendt</option>
+          </select>
+        </div>
+      </div>
+      <div class="sm-foot">
+        <button class="btn btn-ghost" onclick="document.getElementById('subcon-modal-overlay').classList.remove('open')">Annuller</button>
+        <button class="btn btn-primary" onclick="submitNewSubcontractor()">Tilføj</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  window.__SUBCON_COUNTRIES = COUNTRIES;
+})();
+
+function openAddSubcontractorModal() {
+  document.getElementById('subcon-modal-overlay').classList.add('open');
+}
+
+function submitNewSubcontractor() {
+  const name = document.getElementById('subcon-name-input').value.trim();
+  const countryCode = document.getElementById('subcon-country-select').value;
+  const activity = document.getElementById('subcon-activity-input').value.trim();
+  const employeesRaw = document.getElementById('subcon-employees-input').value.trim();
+  const permit = document.getElementById('subcon-permit-select').value;
+  if(!name) { showToast('Manglende navn', 'Angiv firmanavn på underentreprenøren.', 'red'); return; }
+  if(!activity) { showToast('Manglende aktivitet', 'Beskriv kort hvilken aktivitet firmaet udfører.', 'red'); return; }
+  const country = (window.__SUBCON_COUNTRIES||[]).find(c=>c.code===countryCode) || { code:countryCode, name:countryCode, flag:'' };
+  const employees = employeesRaw === '' ? 0 : Math.max(0, parseInt(employeesRaw,10)||0);
+  const permitMap = {
+    missing:  { label:'Mangler',      chip:'chip-red',   status:'Blokeret', statusCls:'s-red'   },
+    review:   { label:'Under review', chip:'chip-amber', status:'Afventer', statusCls:'s-amber' },
+    approved: { label:'Godkendt',     chip:'chip-green', status:'Aktiv',    statusCls:'s-green' },
+  };
+  const p = permitMap[permit] || permitMap.review;
+  const tbody = document.getElementById('subcontractors-tbody');
+  if(!tbody) { showToast('Kunne ikke tilføje', 'Tabellen blev ikke fundet.', 'red'); return; }
+  const tr = document.createElement('tr');
+  tr.innerHTML =
+    `<td><div class="td-name">${escHtml(name)}</div><div class="td-meta">${escHtml(country.name)} · Tier 3</div></td>`+
+    `<td><span class="tag">${country.flag} ${escHtml(country.code)}</span></td>`+
+    `<td><span class="tag">${escHtml(activity)}</span></td>`+
+    `<td style="color:var(--text-100);font-weight:700">${employees}</td>`+
+    `<td><span class="chip ${p.chip}">${p.label}</span></td>`+
+    `<td><span class="status ${p.statusCls}">${p.status}</span></td>`;
+  tbody.appendChild(tr);
+  document.getElementById('subcon-modal-overlay').classList.remove('open');
+  document.getElementById('subcon-name-input').value = '';
+  document.getElementById('subcon-activity-input').value = '';
+  document.getElementById('subcon-employees-input').value = '';
+  document.getElementById('subcon-country-select').selectedIndex = 0;
+  document.getElementById('subcon-permit-select').value = 'review';
+  showToast('Underentreprenør tilføjet', `${name} er tilføjet til leverandørkæden.`, 'green');
+}
+
+document.querySelector('#page-subcontractors .btn-primary')?.addEventListener('click', openAddSubcontractorModal);
 
 // ── EXPIRING PAGE: Send påmindelser knap ──────────────────────
 document.querySelector('#page-expiring .btn-primary')?.addEventListener('click', ()=>openReminderModal('expiring'));
