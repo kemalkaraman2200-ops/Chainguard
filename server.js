@@ -9,7 +9,7 @@ const PDFDocument = require('pdfkit');
 const { Resend } = require('resend');
 const cron = require('node-cron');
 const Stripe = require('stripe');
-const { pool, init } = require('./db');
+const { pool, init, formatSupplier, calcRisk } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -221,6 +221,72 @@ app.get('/logout', (req, res) => {
   res.redirect('/login');
 });
 
+// ── Auth JSON API (bruges af standalone HTML frontend) ────────
+
+// POST /api/auth/login — returnerer JSON + sætter cookie
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password)
+    return res.status(400).json({ error: 'Email og adgangskode er påkrævet.' });
+
+  // Env-var admin-konto — opret i DB hvis ikke eksisterer
+  const adminEmail    = (process.env.ADMIN_EMAIL || '').trim();
+  const adminPassword = (process.env.ADMIN_PASSWORD || '').trim();
+  if (adminEmail && email.trim().toLowerCase() === adminEmail && password === adminPassword) {
+    try {
+      let adminRow = (await pool.query('SELECT * FROM users WHERE email=$1', [adminEmail])).rows[0];
+      if (!adminRow) {
+        const hash = await bcrypt.hash(adminPassword, 10);
+        adminRow = (await pool.query(
+          `INSERT INTO users (email, password, name, role, subscription_status)
+           VALUES ($1,$2,$3,'admin','active') RETURNING *`,
+          [adminEmail, hash, process.env.ADMIN_NAME || 'Admin']
+        )).rows[0];
+      }
+      const token = signToken(adminRow);
+      res.cookie('cg_token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+      return res.json({ ok: true, name: adminRow.name, role: adminRow.role, email: adminRow.email });
+    } catch (e) {
+      // Hvis DB fejler, brug id=0 som fallback
+      const user  = { id: 0, email: adminEmail, name: process.env.ADMIN_NAME || 'Admin', role: 'admin' };
+      const token = signToken(user);
+      res.cookie('cg_token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+      return res.json({ ok: true, name: user.name, role: user.role, email: user.email });
+    }
+  }
+
+  try {
+    const normalizedEmail = email.trim().toLowerCase();
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
+    const user   = result.rows[0];
+
+    if (!user) return res.status(401).json({ error: 'Forkert email eller adgangskode.' });
+
+    const match = await bcrypt.compare(password, user.password.trim());
+    if (!match) return res.status(401).json({ error: 'Forkert email eller adgangskode.' });
+
+    const token = signToken(user);
+    res.cookie('cg_token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+    return res.json({ ok: true, name: user.name, role: user.role, email: user.email });
+  } catch (e) {
+    console.error('API login fejl:', e.message);
+    res.status(500).json({ error: 'Serverfejl — prøv igen.' });
+  }
+});
+
+// GET /api/auth/me — returnerer den aktuelle bruger fra cookie/token
+app.get('/api/auth/me', (req, res) => {
+  const user = getUser(req);
+  if (!user) return res.status(401).json({ error: 'Ikke logget ind.' });
+  res.json({ id: user.id, email: user.email, name: user.name, role: user.role });
+});
+
+// POST /api/auth/logout — rydder cookie (JSON-variant)
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('cg_token');
+  res.json({ ok: true });
+});
+
 // ── CVR API (ingen auth krævet) ─────────────────────────────
 function httpsGet(u) {
   return new Promise((resolve, reject) => {
@@ -295,54 +361,112 @@ app.get('/api/cvr/search/:query', async (req, res) => {
   }
 });
 
-// ── Leverandør API (kræver auth) ────────────────────────────
+// ── Leverandør API ───────────────────────────────────────────
+
+// GET /api/suppliers — alle leverandører for den loggede bruger
 app.get('/api/suppliers', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM suppliers WHERE user_id = $1 ORDER BY added_at DESC',
+      'SELECT * FROM suppliers WHERE user_id = $1 ORDER BY score ASC, added_at DESC',
       [req.user.id]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(formatSupplier));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/suppliers', requireAuth, async (req, res) => {
-  const { cvr, name, address, industry, employees, phone, status, notes } = req.body;
+// GET /api/suppliers/:id — én leverandør
+app.get('/api/suppliers/:id', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      `INSERT INTO suppliers (user_id, cvr, name, address, industry, employees, phone, status, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [req.user.id, cvr, name, address, industry, employees, phone, status || 'pending', notes || '']
+      'SELECT * FROM suppliers WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    res.json(formatSupplier(result.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/suppliers — opret ny leverandør
+app.post('/api/suppliers', requireAuth, async (req, res) => {
+  const { cvr, name, address, industry, type, country, employees, phone, score, risk, status, statusClass, notes } = req.body;
+  if (!name) return res.status(400).json({ error: 'Navn er påkrævet.' });
+
+  const scoreNum      = parseInt(score) || 50;
+  const riskVal       = risk || calcRisk({ score: scoreNum });
+  const statusVal     = status || 'Afventer';
+  const statusClsVal  = statusClass || (statusVal === 'Godkendt' ? 's-green' : statusVal === 'Blokeret' ? 's-red' : 's-amber');
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO suppliers
+         (user_id, cvr, name, address, industry, type, country, employees, phone, score, risk, status, status_class, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       RETURNING *`,
+      [req.user.id, cvr || null, name.trim(), address || '', industry || type || '', type || industry || '',
+       country || 'Danmark', employees || null, phone || '', scoreNum, riskVal, statusVal, statusClsVal, notes || '']
     );
     await pool.query(
       'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
-      [req.user.id, result.rows[0].id, 'TILFØJET', `CVR: ${cvr}`]
+      [req.user.id, result.rows[0].id, 'LEVERANDØR TILFØJET', `${name}${cvr ? ' · CVR: ' + cvr : ''}`]
     );
-    res.json(result.rows[0]);
+    res.status(201).json(formatSupplier(result.rows[0]));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
+// PATCH /api/suppliers/:id — opdatér leverandør
 app.patch('/api/suppliers/:id', requireAuth, async (req, res) => {
-  const { status, notes } = req.body;
+  const { status, statusClass, score, risk, notes, name, type, country } = req.body;
   try {
+    // Hent eksisterende for at merge
+    const cur = await pool.query('SELECT * FROM suppliers WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    const c = cur.rows[0];
+
+    const newScore      = score      !== undefined ? parseInt(score) : c.score;
+    const newRisk       = risk       || calcRisk({ score: newScore });
+    const newStatus     = status     || c.status;
+    const newStatusCls  = statusClass || (newStatus === 'Godkendt' ? 's-green' : newStatus === 'Blokeret' ? 's-red' : 's-amber');
+
     const result = await pool.query(
-      `UPDATE suppliers SET status=$1, notes=$2, updated_at=NOW() WHERE id=$3 AND user_id=$4 RETURNING *`,
-      [status, notes, req.params.id, req.user.id]
+      `UPDATE suppliers SET
+         name=$1, type=$2, country=$3, score=$4, risk=$5,
+         status=$6, status_class=$7, notes=$8, updated_at=NOW()
+       WHERE id=$9 AND user_id=$10 RETURNING *`,
+      [name || c.name, type || c.type, country || c.country,
+       newScore, newRisk, newStatus, newStatusCls,
+       notes !== undefined ? notes : c.notes,
+       req.params.id, req.user.id]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
-    res.json(result.rows[0]);
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.params.id, 'LEVERANDØR OPDATERET', `Status: ${newStatus} · Score: ${newScore}`]
+    );
+    res.json(formatSupplier(result.rows[0]));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
+// DELETE /api/suppliers/:id
 app.delete('/api/suppliers/:id', requireAuth, async (req, res) => {
-  await pool.query('DELETE FROM suppliers WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
-  res.json({ ok: true });
+  try {
+    const cur = await pool.query('SELECT name FROM suppliers WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    await pool.query('DELETE FROM suppliers WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'LEVERANDØR SLETTET', cur.rows[0].name]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── PDF Export (download direkte) ───────────────────────────
