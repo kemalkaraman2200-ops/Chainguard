@@ -128,6 +128,59 @@ async function init() {
     )
   `);
 
+  // cases — sager/projekter (fx en byggeplads)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cases (
+      id           SERIAL PRIMARY KEY,
+      user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      name         VARCHAR(255) NOT NULL,
+      address      VARCHAR(500),
+      client_name  VARCHAR(255),
+      status       VARCHAR(50)  DEFAULT 'active',
+      total_employees INTEGER,
+      created_at   TIMESTAMPTZ  DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ  DEFAULT NOW()
+    )
+  `);
+
+  // case_subcontractors — leverandørkæde for en sag (selv-refererende for tier-struktur)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS case_subcontractors (
+      id              SERIAL PRIMARY KEY,
+      case_id         INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+      supplier_id     INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,
+      parent_id       INTEGER REFERENCES case_subcontractors(id) ON DELETE CASCADE,
+      tier            INTEGER      DEFAULT 1,
+      role_label      VARCHAR(100),
+      activity        VARCHAR(255),
+      employees_on_site INTEGER,
+      permit_status   VARCHAR(50),
+      status          VARCHAR(50)  DEFAULT 'pending',
+      status_class    VARCHAR(20)  DEFAULT 's-amber',
+      added_at        TIMESTAMPTZ  DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ  DEFAULT NOW()
+    )
+  `);
+
+  // apprentices — lærlinge/elever/praktikanter (oplæringskrav)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS apprentices (
+      id            SERIAL PRIMARY KEY,
+      user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      supplier_id   INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+      supplier_name VARCHAR(255),
+      name          VARCHAR(255),
+      type          VARCHAR(50),
+      type_label    VARCHAR(100),
+      education     VARCHAR(255),
+      start_date    DATE,
+      end_date      DATE,
+      status        VARCHAR(50)  DEFAULT 'Afventer',
+      created_at    TIMESTAMPTZ  DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ  DEFAULT NOW()
+    )
+  `);
+
   // Opgrader eksisterende tabeller med nye kolonner (fejler stille hvis kolonnen allerede findes)
   const alters = [
     // users
@@ -164,6 +217,11 @@ async function init() {
     `CREATE INDEX IF NOT EXISTS idx_deviations_user  ON deviations(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_comp_results_sup ON compliance_results(supplier_id, user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_audit_user       ON audit_log(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_cases_user        ON cases(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_case_subs_case    ON case_subcontractors(case_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_case_subs_parent  ON case_subcontractors(parent_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_case_subs_sup     ON case_subcontractors(supplier_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_apprentices_user   ON apprentices(user_id)`,
   ];
 
   // user_id-indeks på documents kun hvis kolonnen nu eksisterer

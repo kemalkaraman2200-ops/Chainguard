@@ -9,6 +9,7 @@ const PDFDocument = require('pdfkit');
 const { Resend } = require('resend');
 const cron = require('node-cron');
 const Stripe = require('stripe');
+const multer = require('multer');
 const { pool, init, formatSupplier, calcRisk } = require('./db');
 
 const app = express();
@@ -469,6 +470,269 @@ app.delete('/api/suppliers/:id', requireAuth, async (req, res) => {
   }
 });
 
+// ── Sager (cases) API ────────────────────────────────────────
+
+function formatCase(row) {
+  return {
+    id:             row.id,
+    name:           row.name,
+    address:        row.address || '',
+    clientName:     row.client_name || '',
+    status:         row.status || 'active',
+    totalEmployees: row.total_employees || null,
+    createdAt:      row.created_at,
+    updatedAt:      row.updated_at,
+  };
+}
+
+// GET /api/cases — alle sager for den loggede bruger
+app.get('/api/cases', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT c.*, COUNT(cs.id)::int AS subcontractor_count
+       FROM cases c
+       LEFT JOIN case_subcontractors cs ON cs.case_id = c.id
+       WHERE c.user_id = $1
+       GROUP BY c.id
+       ORDER BY c.updated_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows.map(row => ({ ...formatCase(row), subcontractorCount: row.subcontractor_count })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/cases/:id — én sag
+app.get('/api/cases/:id', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    res.json(formatCase(result.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/cases — opret ny sag
+app.post('/api/cases', requireAuth, async (req, res) => {
+  const { name, address, clientName, totalEmployees } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Sagsnavn er påkrævet.' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO cases (user_id, name, address, client_name, total_employees)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [req.user.id, name.trim(), address || null, clientName || null, totalEmployees || null]
+    );
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'SAG OPRETTET', name.trim()]
+    );
+    res.status(201).json(formatCase(result.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/cases/:id — opdatér sag
+app.patch('/api/cases/:id', requireAuth, async (req, res) => {
+  const { name, address, clientName, status, totalEmployees } = req.body;
+  try {
+    const cur = await pool.query('SELECT * FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    const c = cur.rows[0];
+    const result = await pool.query(
+      `UPDATE cases SET name=$1, address=$2, client_name=$3, status=$4, total_employees=$5, updated_at=NOW()
+       WHERE id=$6 AND user_id=$7 RETURNING *`,
+      [name || c.name, address !== undefined ? address : c.address,
+       clientName !== undefined ? clientName : c.client_name,
+       status || c.status, totalEmployees !== undefined ? totalEmployees : c.total_employees,
+       req.params.id, req.user.id]
+    );
+    res.json(formatCase(result.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/cases/:id
+app.delete('/api/cases/:id', requireAuth, async (req, res) => {
+  try {
+    const cur = await pool.query('SELECT name FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    await pool.query('DELETE FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'SAG SLETTET', cur.rows[0].name]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Underentreprenør-kæde API ────────────────────────────────
+
+function formatChainNode(row) {
+  return {
+    id:              row.id,
+    caseId:          row.case_id,
+    supplierId:      row.supplier_id,
+    parentId:        row.parent_id,
+    tier:            row.tier,
+    roleLabel:       row.role_label || '',
+    name:            row.supplier_name,
+    country:         row.supplier_country || 'Danmark',
+    activity:        row.activity || '',
+    employeesOnSite: row.employees_on_site,
+    permitStatus:    row.permit_status || '',
+    status:          row.status,
+    statusClass:     row.status_class,
+    addedAt:         row.added_at,
+  };
+}
+
+// Byg et træ ud fra en flad liste (parent_id-relationer)
+function buildChainTree(rows) {
+  const byId = {};
+  rows.forEach(r => { byId[r.id] = { ...formatChainNode(r), children: [] }; });
+  const roots = [];
+  rows.forEach(r => {
+    const node = byId[r.id];
+    if (r.parent_id && byId[r.parent_id]) {
+      byId[r.parent_id].children.push(node);
+    } else {
+      roots.push(node);
+    }
+  });
+  return roots;
+}
+
+// GET /api/cases/:id/chain — hent leverandørkæden som et træ
+app.get('/api/cases/:id/chain', requireAuth, async (req, res) => {
+  try {
+    const caseRow = await pool.query('SELECT id FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!caseRow.rows[0]) return res.status(404).json({ error: 'Sag ikke fundet' });
+
+    const result = await pool.query(
+      `SELECT cs.*, s.name AS supplier_name, s.country AS supplier_country
+       FROM case_subcontractors cs
+       JOIN suppliers s ON s.id = cs.supplier_id
+       WHERE cs.case_id = $1
+       ORDER BY cs.tier ASC, cs.added_at ASC`,
+      [req.params.id]
+    );
+    res.json(buildChainTree(result.rows));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/cases/:id/subcontractors — tilknyt underentreprenør til sagen
+app.post('/api/cases/:id/subcontractors', requireAuth, async (req, res) => {
+  const { supplierId, parentId, roleLabel, activity, employeesOnSite, permitStatus, status } = req.body;
+  if (!supplierId) return res.status(400).json({ error: 'Leverandør er påkrævet.' });
+
+  try {
+    const caseRow = await pool.query('SELECT id FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!caseRow.rows[0]) return res.status(404).json({ error: 'Sag ikke fundet' });
+
+    const supplierRow = await pool.query('SELECT id, name, country FROM suppliers WHERE id=$1 AND user_id=$2', [supplierId, req.user.id]);
+    if (!supplierRow.rows[0]) return res.status(404).json({ error: 'Leverandør ikke fundet' });
+
+    // Beregn tier ud fra parent (parent.tier + 1), ellers tier 1
+    let tier = 1;
+    if (parentId) {
+      const parentRow = await pool.query(
+        'SELECT tier FROM case_subcontractors WHERE id=$1 AND case_id=$2',
+        [parentId, req.params.id]
+      );
+      if (!parentRow.rows[0]) return res.status(404).json({ error: 'Overordnet led ikke fundet' });
+      tier = parentRow.rows[0].tier + 1;
+    }
+
+    const statusVal = status || 'pending';
+    const statusCls = statusVal === 'approved' ? 's-green' : statusVal === 'blocked' ? 's-red' : 's-amber';
+
+    const result = await pool.query(
+      `INSERT INTO case_subcontractors
+         (case_id, supplier_id, parent_id, tier, role_label, activity, employees_on_site, permit_status, status, status_class)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [req.params.id, supplierId, parentId || null, tier, roleLabel || null, activity || null,
+       employeesOnSite || null, permitStatus || null, statusVal, statusCls]
+    );
+
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, supplierId, 'UNDERENTREPRENØR TILKNYTTET', `${supplierRow.rows[0].name} · Tier ${tier} · Sag #${req.params.id}`]
+    );
+
+    res.status(201).json(formatChainNode({ ...result.rows[0], supplier_name: supplierRow.rows[0].name, supplier_country: supplierRow.rows[0].country }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/cases/:id/subcontractors/:linkId — opdatér tilknytning
+app.patch('/api/cases/:id/subcontractors/:linkId', requireAuth, async (req, res) => {
+  const { roleLabel, activity, employeesOnSite, permitStatus, status } = req.body;
+  try {
+    const caseRow = await pool.query('SELECT id FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!caseRow.rows[0]) return res.status(404).json({ error: 'Sag ikke fundet' });
+
+    const cur = await pool.query(
+      `SELECT cs.*, s.name AS supplier_name, s.country AS supplier_country
+       FROM case_subcontractors cs JOIN suppliers s ON s.id = cs.supplier_id
+       WHERE cs.id=$1 AND cs.case_id=$2`,
+      [req.params.linkId, req.params.id]
+    );
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    const c = cur.rows[0];
+
+    const newStatus = status || c.status;
+    const newStatusCls = newStatus === 'approved' ? 's-green' : newStatus === 'blocked' ? 's-red' : 's-amber';
+
+    const result = await pool.query(
+      `UPDATE case_subcontractors SET
+         role_label=$1, activity=$2, employees_on_site=$3, permit_status=$4, status=$5, status_class=$6, updated_at=NOW()
+       WHERE id=$7 AND case_id=$8 RETURNING *`,
+      [roleLabel !== undefined ? roleLabel : c.role_label,
+       activity !== undefined ? activity : c.activity,
+       employeesOnSite !== undefined ? employeesOnSite : c.employees_on_site,
+       permitStatus !== undefined ? permitStatus : c.permit_status,
+       newStatus, newStatusCls, req.params.linkId, req.params.id]
+    );
+    res.json(formatChainNode({ ...result.rows[0], supplier_name: c.supplier_name, supplier_country: c.supplier_country }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/cases/:id/subcontractors/:linkId — fjern tilknytning (og evt. underliggende kæde via CASCADE)
+app.delete('/api/cases/:id/subcontractors/:linkId', requireAuth, async (req, res) => {
+  try {
+    const caseRow = await pool.query('SELECT id FROM cases WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!caseRow.rows[0]) return res.status(404).json({ error: 'Sag ikke fundet' });
+
+    const cur = await pool.query(
+      `SELECT s.name FROM case_subcontractors cs JOIN suppliers s ON s.id = cs.supplier_id
+       WHERE cs.id=$1 AND cs.case_id=$2`,
+      [req.params.linkId, req.params.id]
+    );
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+
+    await pool.query('DELETE FROM case_subcontractors WHERE id=$1 AND case_id=$2', [req.params.linkId, req.params.id]);
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'UNDERENTREPRENØR FJERNET', cur.rows[0].name]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── PDF Export (download direkte) ───────────────────────────
 app.get('/api/export/pdf', requireAuth, async (req, res) => {
   try {
@@ -695,6 +959,454 @@ app.get('/api/compliance/settings', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('SELECT archive_email FROM users WHERE id=$1', [req.user.id]);
     res.json({ archiveEmail: result.rows[0]?.archive_email || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Dokumenter API ──────────────────────────────────────────
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// Tilføj file_data kolonne hvis den ikke findes
+pool.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_data BYTEA`).catch(() => {});
+
+function formatDoc(row) {
+  return {
+    id:          row.id,
+    name:        row.name,
+    meta:        `${row.type} · ${row.expiry ? 'Udløber ' + new Date(row.expiry).toLocaleDateString('da-DK') : 'Indsendt ' + new Date(row.uploaded_at).toLocaleDateString('da-DK')} · ${row.supplier_name || ''}`,
+    type:        row.type,
+    ext:         row.file_ref ? row.file_ref.split('.').pop() : '',
+    statusClass: row.status === 'udløbet' ? 's-red' : row.status === 'gyldig' ? 's-green' : 's-amber',
+    statusLabel: row.status === 'udløbet' ? 'Udløbet' : row.status === 'gyldig' ? 'Gyldig' : 'Afventer',
+    size:        row.file_size || '',
+    supplier_name: row.supplier_name || '',
+    expiry:      row.expiry ? new Date(row.expiry).toISOString().split('T')[0] : null,
+    uploadedAt:  row.uploaded_at,
+    download_url: row.file_data ? `/api/documents/${row.id}/download` : null,
+  };
+}
+
+app.get('/api/documents', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, type, status, expiry, uploaded_at, file_size, file_ref, supplier_name,
+              (file_data IS NOT NULL) AS has_file
+       FROM documents WHERE user_id=$1 ORDER BY uploaded_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows.map(row => ({
+      ...formatDoc(row),
+      download_url: row.has_file ? `/api/documents/${row.id}/download` : null,
+    })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/documents/upload', requireAuth, upload.single('file'), async (req, res) => {
+  try {
+    const { type, supplier_name, expiry, note } = req.body;
+    const file = req.file;
+    const name = file ? `${type || 'Dokument'} — ${supplier_name || ''}` : (req.body.name || 'Dokument');
+    const fileSize = file ? (file.size > 1024 * 1024
+      ? (file.size / (1024 * 1024)).toFixed(1) + ' MB'
+      : Math.round(file.size / 1024) + ' KB') : '';
+    const fileRef = file ? file.originalname : null;
+    const fileData = file ? file.buffer : null;
+
+    // Beregn status baseret på udløbsdato
+    let status = 'gyldig';
+    if (expiry && new Date(expiry) < new Date()) status = 'udløbet';
+
+    const result = await pool.query(
+      `INSERT INTO documents (user_id, supplier_name, name, type, status, expiry, file_size, file_ref, file_data)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [req.user.id, supplier_name || null, name, type || 'Andet', status,
+       expiry || null, fileSize, fileRef, fileData]
+    );
+
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'DOKUMENT UPLOADET', `${name} (${type}) — ${supplier_name || '—'}`]
+    );
+
+    res.json(formatDoc(result.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/documents/:id/download', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT file_data, file_ref, name FROM documents WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!result.rows[0] || !result.rows[0].file_data) return res.status(404).send('Ikke fundet');
+    const { file_data, file_ref, name } = result.rows[0];
+    res.setHeader('Content-Disposition', `attachment; filename="${file_ref || name}"`);
+    res.send(file_data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/documents/:id', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM documents WHERE id=$1 AND user_id=$2 RETURNING name',
+      [req.params.id, req.user.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'DOKUMENT SLETTET', result.rows[0].name]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Afvigelser API ──────────────────────────────────────────
+
+const DEV_TYPE_MAP = {
+  critical:   { label: 'Kritisk',          typeClass: 'chip-red',   status: 'Åben',             statusClass: 's-red'   },
+  open:       { label: 'Åben',             typeClass: 'chip-amber', status: 'Åben',             statusClass: 's-red'   },
+  processing: { label: 'Under behandling', typeClass: 'chip-blue',  status: 'Under behandling', statusClass: 's-blue'  },
+  closed:     { label: 'Lukket',           typeClass: 'chip-green', status: 'Lukket',           statusClass: 's-green' },
+};
+
+function formatDeviation(row) {
+  const end = row.closed_at ? new Date(row.closed_at) : new Date();
+  const daysOpen = Math.max(0, Math.round((end - new Date(row.created_at)) / 86400000));
+  const metaParts = ['Registreret ' + new Date(row.created_at).toLocaleDateString('da-DK')];
+  if (row.location) metaParts.push(row.location);
+  if (row.supplier_name) metaParts.push(row.supplier_name);
+  return {
+    id:           row.id,
+    title:        row.title,
+    meta:         metaParts.join(' · '),
+    body:         row.description || '',
+    location:     row.location || '',
+    supplierName: row.supplier_name || '',
+    type:         row.type,
+    typeLabel:    row.type_label,
+    typeClass:    row.type_class,
+    status:       row.status,
+    statusClass:  row.status_class,
+    daysOpen,
+    closedAt:     row.closed_at,
+    createdAt:    row.created_at,
+  };
+}
+
+// GET /api/deviations — alle afvigelser for den loggede bruger
+app.get('/api/deviations', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM deviations WHERE user_id=$1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    res.json(result.rows.map(formatDeviation));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/deviations — registrér ny afvigelse
+app.post('/api/deviations', requireAuth, async (req, res) => {
+  const { title, body, location, supplierName, type } = req.body;
+  if (!title || !title.trim()) return res.status(400).json({ error: 'Titel er påkrævet.' });
+  const t = DEV_TYPE_MAP[type] || DEV_TYPE_MAP.open;
+  const typeVal = DEV_TYPE_MAP[type] ? type : 'open';
+  try {
+    // Slå leverandøren op så supplier_id kan sættes, hvis navnet matcher
+    let supplierId = null;
+    if (supplierName) {
+      const sup = await pool.query('SELECT id FROM suppliers WHERE name=$1 AND user_id=$2', [supplierName, req.user.id]);
+      supplierId = sup.rows[0] ? sup.rows[0].id : null;
+    }
+    const result = await pool.query(
+      `INSERT INTO deviations (user_id, supplier_id, supplier_name, title, description, location, type, type_label, type_class, status, status_class)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [req.user.id, supplierId, supplierName || null, title.trim(), body || null, location || null,
+       typeVal, t.label, t.typeClass, t.status, t.statusClass]
+    );
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, supplierId, 'AFVIGELSE REGISTRERET', `${title.trim()} (${t.label})`]
+    );
+    res.status(201).json(formatDeviation(result.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/deviations/:id — håndtér/luk/genåbn eller opdatér felter
+// Body: { action: 'handle' | 'close' | 'reopen' } eller direkte felter { title, body, location, type }
+app.patch('/api/deviations/:id', requireAuth, async (req, res) => {
+  const { action, title, body, location, type } = req.body;
+  try {
+    const cur = await pool.query('SELECT * FROM deviations WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    const c = cur.rows[0];
+
+    let newType = c.type, closedAt = c.closed_at, auditAction = null;
+    if (action === 'handle') { newType = 'processing'; auditAction = 'AFVIGELSE HÅNDTERES'; }
+    else if (action === 'close') { newType = 'closed'; closedAt = new Date(); auditAction = 'AFVIGELSE LUKKET'; }
+    else if (action === 'reopen') { newType = 'open'; closedAt = null; auditAction = 'AFVIGELSE GENÅBNET'; }
+    else if (type && DEV_TYPE_MAP[type]) { newType = type; }
+
+    const t = DEV_TYPE_MAP[newType] || DEV_TYPE_MAP.open;
+    const result = await pool.query(
+      `UPDATE deviations SET
+         title=$1, description=$2, location=$3,
+         type=$4, type_label=$5, type_class=$6, status=$7, status_class=$8,
+         closed_at=$9, updated_at=NOW()
+       WHERE id=$10 AND user_id=$11 RETURNING *`,
+      [title || c.title, body !== undefined ? body : c.description,
+       location !== undefined ? location : c.location,
+       newType, t.label, t.typeClass, t.status, t.statusClass,
+       closedAt, req.params.id, req.user.id]
+    );
+    if (auditAction) {
+      await pool.query(
+        'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+        [req.user.id, c.supplier_id, auditAction, c.title]
+      );
+    }
+    res.json(formatDeviation(result.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/deviations/:id
+app.delete('/api/deviations/:id', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM deviations WHERE id=$1 AND user_id=$2 RETURNING title',
+      [req.params.id, req.user.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Ikke fundet' });
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'AFVIGELSE SLETTET', result.rows[0].title]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Compliance-tjek API ─────────────────────────────────────
+// Server-udgave af frontendens compliance-motor: 9 krav × alle leverandører.
+// Dokument-status i DB ('gyldig'/'udløbet'/andet) mappes til ok/fail/warn.
+
+function docState(doc) {
+  if (!doc) return null;
+  if (doc.status === 'udløbet') return 'fail';
+  if (doc.status === 'gyldig') return 'ok';
+  return 'warn';
+}
+function findDoc(docs, ...terms) {
+  return docs.find(d => {
+    const n = (d.name || '').toLowerCase() + ' ' + (d.type || '').toLowerCase();
+    return terms.some(t => n.includes(t));
+  });
+}
+
+const COMPLIANCE_REQS = [
+  { id: 'insurance', label: 'Gyldig forsikring', category: 'Forsikring',
+    check: (s, docs) => docState(findDoc(docs, 'forsikring')) || 'fail' },
+  { id: 'contract', label: 'Underskrevet kontrakt', category: 'Kontrakt',
+    check: (s, docs) => docState(findDoc(docs, 'kontrakt')) || 'fail' },
+  { id: 'work_permit', label: 'Arbejdstilladelse (udenlandsk)', category: 'Lovkrav',
+    check: (s, docs) => {
+      if (s.country === 'Danmark') return 'ok';
+      return docState(findDoc(docs, 'arbejdstilladelse', 'a1')) || 'fail';
+    } },
+  { id: 'esg', label: 'ESG due diligence-skema', category: 'ESG',
+    check: (s, docs) => {
+      if (s.risk !== 'high' && s.risk !== 'medium') return 'ok';
+      return docState(findDoc(docs, 'esg')) || 'fail';
+    } },
+  { id: 'salary_doc', label: 'Løndokumentation', category: 'Løn',
+    check: (s, docs) => {
+      if (s.risk === 'low' && s.country === 'Danmark') return 'ok';
+      const st = docState(findDoc(docs, 'løn', 'loen'));
+      if (!st) return 'warn';
+      return st === 'fail' ? 'fail' : 'ok';
+    } },
+  { id: 'cvr', label: 'CVR/registrering valideret', category: 'Lovkrav',
+    check: (s) => {
+      if (s.country !== 'Danmark') return 'ok';
+      return (s.cvr && s.cvr !== '—') ? 'ok' : 'fail';
+    } },
+  { id: 'rut', label: 'RUT-registrering', category: 'Lovkrav',
+    check: (s) => {
+      if (s.country === 'Danmark') return 'ok';
+      return s.risk === 'high' ? 'fail' : 'warn';
+    } },
+  { id: 'risk_class', label: 'Risikoklassificering foretaget', category: 'Risiko',
+    check: (s) => (s.risk ? 'ok' : 'fail') },
+  { id: 'sanction', label: 'Sanktions- og PEP-screening', category: 'Screening',
+    check: (s) => {
+      if (s.status === 'Blokeret') return 'fail';
+      if (s.country === 'Danmark' && s.risk === 'low') return 'ok';
+      return 'warn';
+    } },
+];
+
+async function runComplianceForUser(userId) {
+  const supRes = await pool.query('SELECT * FROM suppliers WHERE user_id=$1 ORDER BY name', [userId]);
+  const docRes = await pool.query('SELECT name, type, status, supplier_name FROM documents WHERE user_id=$1', [userId]);
+
+  const docsBySupplier = {};
+  docRes.rows.forEach(d => {
+    const key = d.supplier_name || '';
+    (docsBySupplier[key] = docsBySupplier[key] || []).push(d);
+  });
+
+  const results = {};
+  supRes.rows.forEach(s => {
+    const docs = docsBySupplier[s.name] || [];
+    results[s.id] = {};
+    COMPLIANCE_REQS.forEach(r => { results[s.id][r.id] = r.check(s, docs); });
+  });
+  return { suppliers: supRes.rows, results };
+}
+
+// POST /api/compliance/check — kør fuldt tjek, gem resultater, returnér per leverandør
+app.post('/api/compliance/check', requireAuth, async (req, res) => {
+  try {
+    const { suppliers, results } = await runComplianceForUser(req.user.id);
+
+    // Erstat tidligere resultater med det nye kørselsresultat
+    await pool.query('DELETE FROM compliance_results WHERE user_id=$1', [req.user.id]);
+    for (const s of suppliers) {
+      for (const r of COMPLIANCE_REQS) {
+        await pool.query(
+          `INSERT INTO compliance_results (user_id, supplier_id, req_id, req_label, result)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [req.user.id, s.id, r.id, r.label, results[s.id][r.id]]
+        );
+      }
+    }
+
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'COMPLIANCE-TJEK KØRT', `${suppliers.length} leverandører × ${COMPLIANCE_REQS.length} krav`]
+    );
+
+    res.json({
+      lastRun: new Date().toISOString(),
+      requirements: COMPLIANCE_REQS.map(r => ({ id: r.id, label: r.label, category: r.category })),
+      suppliers: suppliers.map(s => ({ id: s.id, name: s.name, country: s.country, risk: s.risk })),
+      results,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/compliance/results — seneste gemte kørsel
+app.get('/api/compliance/results', requireAuth, async (req, res) => {
+  try {
+    const rows = await pool.query(
+      `SELECT cr.supplier_id, cr.req_id, cr.result, cr.checked_at, s.name, s.country, s.risk
+       FROM compliance_results cr JOIN suppliers s ON s.id = cr.supplier_id
+       WHERE cr.user_id=$1`,
+      [req.user.id]
+    );
+    if (!rows.rows.length) return res.json({ lastRun: null, requirements: COMPLIANCE_REQS.map(r => ({ id: r.id, label: r.label, category: r.category })), suppliers: [], results: {} });
+
+    const results = {};
+    const suppliersById = {};
+    let lastRun = null;
+    rows.rows.forEach(r => {
+      (results[r.supplier_id] = results[r.supplier_id] || {})[r.req_id] = r.result;
+      suppliersById[r.supplier_id] = { id: r.supplier_id, name: r.name, country: r.country, risk: r.risk };
+      if (!lastRun || new Date(r.checked_at) > new Date(lastRun)) lastRun = r.checked_at;
+    });
+    res.json({
+      lastRun,
+      requirements: COMPLIANCE_REQS.map(r => ({ id: r.id, label: r.label, category: r.category })),
+      suppliers: Object.values(suppliersById),
+      results,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── CSV Eksport API ─────────────────────────────────────────
+
+function sendCSV(res, filename, rows) {
+  const csv = rows.map(row =>
+    row.map(cell => {
+      const s = (cell == null ? '' : String(cell)).replace(/"/g, '""');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+    }).join(',')
+  ).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send('﻿' + csv); // BOM så Excel læser UTF-8 korrekt
+}
+
+const dateStamp = () => new Date().toISOString().slice(0, 10);
+
+// GET /api/export/csv/suppliers
+app.get('/api/export/csv/suppliers', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM suppliers WHERE user_id=$1 ORDER BY name', [req.user.id]);
+    const riskLabel = { high: 'Høj', medium: 'Medium', low: 'Lav' };
+    const rows = [['ID', 'Navn', 'CVR', 'Land', 'Branche', 'Type', 'Ansatte', 'Risiko', 'Score', 'Status', 'Tilføjet']];
+    result.rows.forEach(s => rows.push([
+      s.id, s.name, s.cvr || '—', s.country, s.industry || '—', s.type || '—',
+      s.employees || '—', riskLabel[s.risk] || s.risk, s.score, s.status,
+      new Date(s.added_at).toLocaleDateString('da-DK'),
+    ]));
+    sendCSV(res, `chainguard-leverandoerer-${dateStamp()}.csv`, rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/export/csv/deviations
+app.get('/api/export/csv/deviations', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM deviations WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
+    const rows = [['ID', 'Titel', 'Type', 'Status', 'Leverandør', 'Placering', 'Dage åben', 'Registreret', 'Lukket', 'Detaljer']];
+    result.rows.forEach(d => {
+      const f = formatDeviation(d);
+      rows.push([
+        d.id, d.title, f.typeLabel, d.status, d.supplier_name || '—', d.location || '—',
+        f.daysOpen, new Date(d.created_at).toLocaleDateString('da-DK'),
+        d.closed_at ? new Date(d.closed_at).toLocaleDateString('da-DK') : '—',
+        d.description || '',
+      ]);
+    });
+    sendCSV(res, `chainguard-afvigelser-${dateStamp()}.csv`, rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/export/csv/apprentices
+app.get('/api/export/csv/apprentices', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM apprentices WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
+    const rows = [['Navn', 'Type', 'Uddannelse', 'Leverandør', 'Startdato', 'Slutdato', 'Status']];
+    result.rows.forEach(a => rows.push([
+      a.name || 'Afventer', a.type_label || a.type || '—', a.education || '—', a.supplier_name || '—',
+      a.start_date ? new Date(a.start_date).toLocaleDateString('da-DK') : '—',
+      a.end_date ? new Date(a.end_date).toLocaleDateString('da-DK') : '—',
+      a.status || '—',
+    ]));
+    sendCSV(res, `chainguard-laerlinge-${dateStamp()}.csv`, rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
