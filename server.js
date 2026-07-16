@@ -1342,6 +1342,69 @@ app.get('/api/compliance/results', requireAuth, async (req, res) => {
   }
 });
 
+// ── Lærlinge API (sync-model) ───────────────────────────────
+// Frontenden ejer objektformatet og syncer hele registret; backend gemmer
+// objektet i JSONB + udtrukne kolonner til CSV-eksport og rapporter.
+
+const APPRENTICE_TYPE_LABELS = { eud: 'EUD', eux: 'EUX', adult: 'Voksenlærling', intern: 'Praktikant' };
+
+// GET /api/apprentices — hele registret for den loggede bruger
+app.get('/api/apprentices', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT data FROM apprentices WHERE user_id=$1 AND data IS NOT NULL ORDER BY created_at ASC',
+      [req.user.id]
+    );
+    res.json(result.rows.map(r => r.data));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/apprentices/sync — upsert hele registret; rækker der ikke længere findes, slettes
+app.put('/api/apprentices/sync', requireAuth, async (req, res) => {
+  const list = req.body && Array.isArray(req.body.apprentices) ? req.body.apprentices : null;
+  if (!list) return res.status(400).json({ error: 'apprentices skal være en liste.' });
+  try {
+    const clientIds = list.map(a => String(a.id)).filter(Boolean);
+    if (clientIds.length) {
+      await pool.query(
+        'DELETE FROM apprentices WHERE user_id=$1 AND (client_id IS NULL OR NOT (client_id = ANY($2)))',
+        [req.user.id, clientIds]
+      );
+    } else {
+      await pool.query('DELETE FROM apprentices WHERE user_id=$1', [req.user.id]);
+    }
+
+    // supplierId fra frontend kan pege på demo-data — sæt kun FK når leverandøren findes i DB
+    const supRows = await pool.query('SELECT id FROM suppliers WHERE user_id=$1', [req.user.id]);
+    const validSupIds = new Set(supRows.rows.map(r => r.id));
+
+    for (const a of list) {
+      if (!a.id) continue;
+      const statusLabel = a.status === 'confirmed' ? 'Bekræftet' : a.status === 'expired' ? 'Udløbet' : 'Afventer';
+      await pool.query(
+        `INSERT INTO apprentices (user_id, client_id, supplier_id, supplier_name, name, type, type_label, education, start_date, end_date, status, data, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+         ON CONFLICT (user_id, client_id) DO UPDATE SET
+           supplier_id=EXCLUDED.supplier_id, supplier_name=EXCLUDED.supplier_name,
+           name=EXCLUDED.name, type=EXCLUDED.type, type_label=EXCLUDED.type_label,
+           education=EXCLUDED.education, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date,
+           status=EXCLUDED.status, data=EXCLUDED.data, updated_at=NOW()`,
+        [req.user.id, String(a.id),
+         validSupIds.has(a.supplierId) ? a.supplierId : null,
+         a.supplierName || null, a.name || null, a.type || null,
+         APPRENTICE_TYPE_LABELS[a.type] || a.type || null,
+         a.education || null, a.startDate || null, a.endDate || null,
+         statusLabel, JSON.stringify(a)]
+      );
+    }
+    res.json({ ok: true, count: list.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── CSV Eksport API ─────────────────────────────────────────
 
 function sendCSV(res, filename, rows) {

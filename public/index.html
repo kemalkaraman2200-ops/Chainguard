@@ -2395,10 +2395,49 @@ function saveProjectReq() {
 
 // Lærlinge-register
 let APPRENTICES = JSON.parse(localStorage.getItem('cg-apprentices') || 'null') || [];
+let _apApiOn = false; // true når backend-API'et svarer — så syncer registret til databasen
+
+// GDPR: send aldrig fulde CPR-numre til backend — kun de sidste 4 cifre til maskeret visning
+function _apSanitize(a) {
+  const c = { ...a };
+  if (c.cpr) c.cpr = String(c.cpr).replace(/\D/g,'').slice(-4);
+  return c;
+}
+
+function _syncApprenticesToAPI() {
+  if (!_apApiOn) return;
+  fetch('/api/apprentices/sync', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apprentices: APPRENTICES.map(_apSanitize) })
+  }).catch(function(){});
+}
 
 function saveApprentices() {
   try { localStorage.setItem('cg-apprentices', JSON.stringify(APPRENTICES)); } catch(e) {}
+  _syncApprenticesToAPI();
 }
+
+// Forsøg at hente lærlinge fra API — fallback til localStorage i standalone HTML
+async function _loadApprenticesFromAPI() {
+  try {
+    const r = await fetch('/api/apprentices', { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return;
+    _apApiOn = true;
+    if (rows.length > 0) {
+      APPRENTICES = rows;
+      try { localStorage.setItem('cg-apprentices', JSON.stringify(APPRENTICES)); } catch(e) {}
+      refreshApprenticePage();
+    } else if (APPRENTICES.length > 0) {
+      // Første sync: skub eksisterende lokale data op i databasen
+      _syncApprenticesToAPI();
+    }
+  } catch(e) {
+    // Ingen backend — kør videre med localStorage
+  }
+}
+_loadApprenticesFromAPI();
 
 // Genererer et "MitID-token" til simuleret bekræftelse
 function generateMitIDToken() {

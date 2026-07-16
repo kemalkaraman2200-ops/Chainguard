@@ -163,10 +163,12 @@ async function init() {
   `);
 
   // apprentices — lærlinge/elever/praktikanter (oplæringskrav)
+  // client_id = frontendens eget id ('ap_...'); data = hele frontend-objektet (sync-model)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS apprentices (
       id            SERIAL PRIMARY KEY,
       user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      client_id     VARCHAR(50),
       supplier_id   INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
       supplier_name VARCHAR(255),
       name          VARCHAR(255),
@@ -176,8 +178,10 @@ async function init() {
       start_date    DATE,
       end_date      DATE,
       status        VARCHAR(50)  DEFAULT 'Afventer',
+      data          JSONB,
       created_at    TIMESTAMPTZ  DEFAULT NOW(),
-      updated_at    TIMESTAMPTZ  DEFAULT NOW()
+      updated_at    TIMESTAMPTZ  DEFAULT NOW(),
+      UNIQUE (user_id, client_id)
     )
   `);
 
@@ -204,6 +208,10 @@ async function init() {
     `ALTER TABLE documents ADD COLUMN IF NOT EXISTS status     VARCHAR(20) DEFAULT 'gyldig'`,
     `ALTER TABLE documents ADD COLUMN IF NOT EXISTS expiry     DATE`,
     `ALTER TABLE documents ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(255)`,
+    // apprentices — tabellen kan være oprettet i tidligere version uden sync-kolonner
+    `ALTER TABLE apprentices ADD COLUMN IF NOT EXISTS client_id VARCHAR(50)`,
+    `ALTER TABLE apprentices ADD COLUMN IF NOT EXISTS data      JSONB`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_apprentices_client ON apprentices(user_id, client_id)`,
   ];
 
   for (const sql of alters) {
