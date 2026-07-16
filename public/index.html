@@ -1081,9 +1081,9 @@ Aarhus Havnefront</div>
         <div class="live-dot"></div>
         Opdateret nu
       </div>
-      <div class="project-pill">
+      <div class="project-pill" id="project-pill" onclick="toggleCaseDropdown(event)" style="cursor:pointer;position:relative">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v1.5H2zm2 4h8V9.5H4zm2 4h4V13.5H6z"/></svg>
-        Alle projekter
+        <span id="project-pill-label">Alle projekter</span>
         <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6"><path d="M4 6l4 4 4-4H4z"/></svg>
       </div>
       <button class="theme-toggle" id="theme-toggle" title="Skift tema">
@@ -1412,13 +1412,13 @@ Aarhus Havnefront</div>
           <div class="section-title">Underentreprenører</div>
           <div class="section-sub" id="subs-subtitle">Kæde-leverandører og underleverandørrelationer</div>
         </div>
-        <button class="btn btn-primary" onclick="openDeviationModal()">
+        <button class="btn btn-primary" onclick="openAddSubModal()">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="white"><path d="M8 1a.75.75 0 01.75.75V7.25h5.5a.75.75 0 010 1.5H8.75v5.5a.75.75 0 01-1.5 0V8.75H1.75a.75.75 0 010-1.5H7.25V1.75A.75.75 0 018 1z"/></svg>
           Tilknyt underentreprenør
         </button>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Leverandørkæde — Aarhus Havnefront</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
+        <div class="card-head" onclick="toggleCard(this)"><div class="card-title" id="subs-chain-title">Leverandørkæde — Aarhus Havnefront</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div></div>
         <div class="card-body">
         <div style="padding:24px 22px;position:relative;z-index:1">
           <!-- Chain visualisation -->
@@ -1427,15 +1427,12 @@ Aarhus Havnefront</div>
             <div style="display:flex;justify-content:center;margin-bottom:4px">
               <div style="background:linear-gradient(135deg,rgba(124,92,252,0.25),rgba(99,91,255,0.15));border:1px solid rgba(124,92,252,0.4);border-radius:var(--r);padding:12px 20px;text-align:center;min-width:200px">
                 <div style="font-size:10px;font-weight:700;color:var(--violet-l);letter-spacing:0.8px;text-transform:uppercase;margin-bottom:4px">Bygherre (Tier 0)</div>
-                <div style="font-size:14px;font-weight:800;color:var(--text-100)">Aarhus Kommune</div>
+                <div style="font-size:14px;font-weight:800;color:var(--text-100)" id="subs-tier0-name">Aarhus Kommune</div>
               </div>
             </div>
             <div style="display:flex;justify-content:center;margin-bottom:4px"><div style="width:1px;height:24px;background:var(--border-med)"></div></div>
             <!-- Level 1 -->
-            <div style="display:flex;justify-content:center;gap:16px;margin-bottom:4px">
-              <div style="text-align:center"><div style="width:1px;height:0"></div></div>
-            </div>
-            <div style="display:flex;justify-content:center;gap:16px;margin-bottom:4px">
+            <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-bottom:4px" id="subs-chain-tier1">
               <div style="background:var(--bg-card);border:1px solid var(--border-med);border-radius:var(--r);padding:12px 18px;text-align:center;min-width:170px">
                 <div style="font-size:9.5px;font-weight:700;color:var(--text-30);letter-spacing:0.8px;text-transform:uppercase;margin-bottom:4px">Totalentreprenør (Tier 1)</div>
                 <div style="font-size:13.5px;font-weight:800;color:var(--text-100)">NCC Group A/S</div>
@@ -1443,7 +1440,7 @@ Aarhus Havnefront</div>
               </div>
             </div>
             <div style="display:flex;justify-content:center;margin-bottom:4px"><div style="width:1px;height:24px;background:var(--border-med)"></div></div>
-            <!-- Level 2 — dynamisk fra SUPPLIERS -->
+            <!-- Level 2 — dynamisk fra SUPPLIERS eller projektets kæde -->
             <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap" id="subs-chain-tier2">
               <div style="color:var(--text-30);font-size:12px;padding:16px">Indlæser…</div>
             </div>
@@ -1452,7 +1449,7 @@ Aarhus Havnefront</div>
         </div>
       </div>
       <div class="card">
-        <div class="card-head" onclick="toggleCard(this)"><div class="card-title">Baltic Build UAB — Tier 2 · Underentreprenører</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div><span class="chip chip-red">3 udestående</span></div>
+        <div class="card-head" onclick="toggleCard(this)"><div class="card-title" id="subs-table-title">Baltic Build UAB — Tier 2 · Underentreprenører</div><div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div><span class="chip chip-red" id="subs-table-chip">3 udestående</span></div>
         <div class="card-body">
         <div class="table-wrap">
           <table>
@@ -3348,7 +3345,7 @@ function handleTopbarPrimary() {
   } else if (page === 'compliance-check') {
     runComplianceCheck();
   } else if (page === 'subcontractors') {
-    showToast('Tilknyt underentreprenør', 'Funktionen er under implementering. CVR-søgning kan bruges til oprettelse.', 'blue');
+    openAddSubModal();
   } else if (page === 'onboarding') {
     navigateTo('dashboard');
     setTimeout(() => {
@@ -4998,6 +4995,11 @@ function renderRiskPage() {
 
 // ── UNDERENTREPRENØRER: Dynamisk kæde ────────────────────────
 function renderSubsPage() {
+  // Projekt valgt + backend → vis projektets rigtige leverandørkæde
+  if (typeof _activeCase !== 'undefined' && _activeCase && _casesApiOn) {
+    renderCaseChain();
+    return;
+  }
   const tier2 = SUPPLIERS.filter(s => s.id !== 1 || true); // alle leverandører er Tier 2
 
   const sub = document.getElementById('subs-subtitle');
@@ -5035,6 +5037,359 @@ function renderSubsPage() {
       <tr><td><div class="td-name">Kaunas Works UAB</div><div class="td-meta">Litauen · Tier 3</div></td><td><span class="tag">🇱🇹 LT</span></td><td><span class="tag">Betonarbejde</span></td><td style="color:var(--text-100);font-weight:700">12</td><td><span class="chip chip-red">Mangler</span></td><td><span class="status s-red">Blokeret</span></td></tr>
       <tr><td><div class="td-name">Vilnius Steel OÜ</div><div class="td-meta">Estland · Tier 3</div></td><td><span class="tag">🇪🇪 EE</span></td><td><span class="tag">Armering</span></td><td style="color:var(--text-100);font-weight:700">6</td><td><span class="chip chip-amber">Under review</span></td><td><span class="status s-amber">Afventer</span></td></tr>
       <tr><td><div class="td-name">LatBuild SIA</div><div class="td-meta">Letland · Tier 3</div></td><td><span class="tag">🇱🇻 LV</span></td><td><span class="tag">Transport</span></td><td style="color:var(--text-100);font-weight:700">3</td><td><span class="chip chip-green">Godkendt</span></td><td><span class="status s-green">Aktiv</span></td></tr>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PROJEKT-MOTOR (sager) — vælg/opret projekt + leverandørkæde
+// Backend: /api/cases + /api/cases/:id/chain + /subcontractors
+// ══════════════════════════════════════════════════════════════
+
+let CASES = [];
+let _activeCase = null;   // det valgte projekt (objekt fra /api/cases)
+let _casesApiOn = false;
+let _chainTree = [];      // træ fra /api/cases/:id/chain
+let _chainFlat = [];      // fladt udtræk af træet
+
+function _cgEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+const CHAIN_STATUS_LABEL = { approved: 'Godkendt', pending: 'Afventer', blocked: 'Blokeret' };
+const PERMIT_CHIP = { 'Godkendt': 'chip-green', 'Under review': 'chip-amber', 'Mangler': 'chip-red' };
+
+// ── Hent projekter fra API ───────────────────────────────────
+async function _loadCasesFromAPI() {
+  try {
+    const r = await fetch('/api/cases', { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return;
+    _casesApiOn = true;
+    CASES = rows;
+    // Genskab senest valgte projekt
+    const savedId = localStorage.getItem('cg-active-case');
+    if (savedId) {
+      const c = CASES.find(x => String(x.id) === String(savedId));
+      if (c) { _activeCase = c; _updateCasePill(); fetchCaseChain(); }
+    }
+  } catch(e) {
+    // Ingen backend — projektvælgeren viser demo-projektet
+  }
+}
+_loadCasesFromAPI();
+
+function _updateCasePill() {
+  const lbl = document.getElementById('project-pill-label');
+  if (lbl) lbl.textContent = _activeCase ? _activeCase.name : 'Alle projekter';
+}
+
+// ── Projekt-dropdown ─────────────────────────────────────────
+function toggleCaseDropdown(e) {
+  if (e) e.stopPropagation();
+  const existing = document.getElementById('case-dropdown');
+  if (existing) { existing.remove(); return; }
+
+  const items = [];
+  items.push(`<div class="case-dd-item ${!_activeCase ? 'active' : ''}" onclick="selectCase(null)">
+    <span>Alle projekter</span>${!_activeCase ? '<span style="color:var(--violet-l)">✓</span>' : ''}</div>`);
+  if (_casesApiOn) {
+    CASES.forEach(c => {
+      items.push(`<div class="case-dd-item ${_activeCase && _activeCase.id === c.id ? 'active' : ''}" onclick="selectCase(${c.id})">
+        <span>${_cgEsc(c.name)}<span style="color:var(--text-30);font-size:11px;margin-left:6px">${c.subcontractorCount || 0} led</span></span>
+        ${_activeCase && _activeCase.id === c.id ? '<span style="color:var(--violet-l)">✓</span>' : ''}</div>`);
+    });
+  } else {
+    items.push(`<div class="case-dd-item" style="color:var(--text-30);cursor:default">Aarhus Havnefront (demo)</div>`);
+  }
+  items.push(`<div class="case-dd-item" style="border-top:1px solid var(--border);color:var(--violet-l);font-weight:700" onclick="openCreateCaseModal()">
+    <span>＋ Opret nyt projekt</span></div>`);
+
+  const dd = document.createElement('div');
+  dd.id = 'case-dropdown';
+  dd.style.cssText = 'position:absolute;top:calc(100% + 8px);right:0;min-width:260px;background:var(--bg);border:1px solid var(--border-hi);border-radius:var(--r);box-shadow:0 18px 50px rgba(0,0,0,0.5);z-index:500;overflow:hidden;padding:6px';
+  dd.innerHTML = `<style>
+    .case-dd-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;font-size:12.5px;color:var(--text-80);cursor:pointer;white-space:nowrap}
+    .case-dd-item:hover{background:var(--bg-card);color:var(--text-100)}
+    .case-dd-item.active{color:var(--text-100);font-weight:700}
+  </style>` + items.join('');
+  dd.addEventListener('click', ev => ev.stopPropagation());
+  document.getElementById('project-pill').appendChild(dd);
+
+  setTimeout(() => document.addEventListener('click', function closeDd() {
+    const el = document.getElementById('case-dropdown');
+    if (el) el.remove();
+    document.removeEventListener('click', closeDd);
+  }), 0);
+}
+
+function selectCase(id) {
+  const dd = document.getElementById('case-dropdown');
+  if (dd) dd.remove();
+  _activeCase = id == null ? null : CASES.find(c => c.id === id) || null;
+  try {
+    if (_activeCase) localStorage.setItem('cg-active-case', String(_activeCase.id));
+    else localStorage.removeItem('cg-active-case');
+  } catch(e) {}
+  _updateCasePill();
+  if (_activeCase) {
+    fetchCaseChain();
+    showToast('Projekt valgt', _activeCase.name + ' er nu aktivt — se Underentreprenører-siden.', 'blue');
+  } else {
+    renderSubsPage();
+  }
+}
+
+// ── Opret projekt ────────────────────────────────────────────
+function openCreateCaseModal() {
+  const dd = document.getElementById('case-dropdown');
+  if (dd) dd.remove();
+  if (!_casesApiOn) { showToast('Kræver backend', 'Projekter gemmes i databasen og kræver at serveren kører.', 'amber'); return; }
+
+  let overlay = document.getElementById('case-modal-overlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'case-modal-overlay';
+  overlay.className = 'simple-modal-overlay open';
+  overlay.innerHTML = `
+    <div class="simple-modal">
+      <div class="sm-head">
+        <span class="sm-title">Opret nyt projekt</span>
+        <button class="drawer-close" onclick="document.getElementById('case-modal-overlay').remove()">✕</button>
+      </div>
+      <div class="sm-body">
+        <div><div class="sm-label">Projektnavn *</div><input class="sm-input" id="case-name-input" placeholder="F.eks. Aarhus Havnefront etape 2…"/></div>
+        <div><div class="sm-label">Bygherre</div><input class="sm-input" id="case-client-input" placeholder="F.eks. Aarhus Kommune"/></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><div class="sm-label">Adresse</div><input class="sm-input" id="case-address-input" placeholder="Byggepladsens adresse"/></div>
+          <div><div class="sm-label">Estimeret bemanding</div><input class="sm-input" id="case-employees-input" type="number" min="0" placeholder="F.eks. 240"/></div>
+        </div>
+      </div>
+      <div class="sm-foot">
+        <button class="btn btn-ghost" onclick="document.getElementById('case-modal-overlay').remove()">Annuller</button>
+        <button class="btn btn-primary" onclick="submitCreateCase()">Opret projekt</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', function(e){ if (e.target === this) this.remove(); });
+  document.body.appendChild(overlay);
+  setTimeout(() => { const i = document.getElementById('case-name-input'); if (i) i.focus(); }, 80);
+}
+
+async function submitCreateCase() {
+  const name = document.getElementById('case-name-input').value.trim();
+  if (!name) { showToast('Manglende navn', 'Angiv et navn for projektet.', 'red'); return; }
+  const payload = {
+    name,
+    clientName: document.getElementById('case-client-input').value.trim() || null,
+    address: document.getElementById('case-address-input').value.trim() || null,
+    totalEmployees: parseInt(document.getElementById('case-employees-input').value, 10) || null,
+  };
+  try {
+    const r = await fetch('/api/cases', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error((await r.json()).error || 'HTTP ' + r.status);
+    const c = await r.json();
+    c.subcontractorCount = 0;
+    CASES.unshift(c);
+    document.getElementById('case-modal-overlay').remove();
+    _activeCase = c;
+    try { localStorage.setItem('cg-active-case', String(c.id)); } catch(e) {}
+    _updateCasePill();
+    fetchCaseChain();
+    showToast('Projekt oprettet', `"${name}" er oprettet. Tilknyt firmaer på Underentreprenører-siden.`, 'green');
+    navigateTo('subcontractors');
+  } catch(e) {
+    showToast('Fejl', 'Projektet kunne ikke oprettes: ' + e.message, 'red');
+  }
+}
+
+// ── Projektets leverandørkæde ────────────────────────────────
+function _flattenChain(nodes, acc) {
+  nodes.forEach(n => { acc.push(n); if (n.children && n.children.length) _flattenChain(n.children, acc); });
+  return acc;
+}
+
+async function fetchCaseChain() {
+  if (!_activeCase || !_casesApiOn) return;
+  try {
+    const r = await fetch(`/api/cases/${_activeCase.id}/chain`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    _chainTree = await r.json();
+    _chainFlat = _flattenChain(_chainTree, []);
+    renderCaseChain();
+  } catch(e) {
+    showToast('Fejl', 'Kunne ikke hente leverandørkæden.', 'red');
+  }
+}
+
+function _chainNodeHtml(n) {
+  const border = n.status === 'blocked' ? 'var(--red-ring)' : n.status === 'pending' ? 'var(--amber-ring)' : 'var(--border-med)';
+  const label = n.roleLabel || (n.tier === 1 ? 'Totalentreprenør (Tier 1)' : 'Tier ' + n.tier);
+  return `
+    <div style="background:var(--bg-card);border:1px solid ${border};border-radius:var(--r);padding:12px 18px;text-align:center;min-width:150px">
+      <div style="font-size:9.5px;font-weight:700;color:var(--text-30);letter-spacing:0.8px;text-transform:uppercase;margin-bottom:4px">${_cgEsc(label)}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--text-100)">${_cgEsc(n.name)}</div>
+      <div style="margin-top:6px"><span class="status ${n.statusClass}">${CHAIN_STATUS_LABEL[n.status] || n.status}</span></div>
+    </div>`;
+}
+
+function renderCaseChain() {
+  if (!_activeCase) return;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+
+  set('subs-chain-title', 'Leverandørkæde — ' + _activeCase.name);
+  set('subs-tier0-name', _activeCase.clientName || '—');
+  set('subs-subtitle', _chainFlat.length + ' led i kæden · ' + _activeCase.name);
+  set('subs-table-title', 'Tilknyttede underentreprenører — ' + _activeCase.name);
+
+  const pending = _chainFlat.filter(n => n.status !== 'approved').length;
+  const chipEl = document.getElementById('subs-table-chip');
+  if (chipEl) {
+    chipEl.textContent = pending ? pending + ' udestående' : 'Alle godkendt';
+    chipEl.className = 'chip ' + (pending ? 'chip-red' : 'chip-green');
+  }
+
+  const tier1 = _chainFlat.filter(n => n.tier === 1);
+  const tier2 = _chainFlat.filter(n => n.tier === 2);
+
+  const t1El = document.getElementById('subs-chain-tier1');
+  if (t1El) t1El.innerHTML = tier1.length ? tier1.map(_chainNodeHtml).join('')
+    : '<div style="color:var(--text-30);font-size:12px;padding:12px">Ingen led endnu — klik "Tilknyt underentreprenør"</div>';
+  const t2El = document.getElementById('subs-chain-tier2');
+  if (t2El) t2El.innerHTML = tier2.length ? tier2.map(_chainNodeHtml).join('')
+    : '<div style="color:var(--text-30);font-size:12px;padding:8px">' + (tier1.length ? 'Ingen underliggende led' : '') + '</div>';
+
+  const tbl = document.getElementById('subs-tier3-tbody');
+  if (tbl) {
+    tbl.innerHTML = _chainFlat.length ? _chainFlat.map(n => `
+      <tr>
+        <td><div class="td-name">${_cgEsc(n.name)}</div><div class="td-meta">${_cgEsc(n.roleLabel || '')} · Tier ${n.tier}</div></td>
+        <td><span class="tag">${_cgEsc(n.country)}</span></td>
+        <td><span class="tag">${_cgEsc(n.activity || '—')}</span></td>
+        <td style="color:var(--text-100);font-weight:700">${n.employeesOnSite != null ? n.employeesOnSite : '—'}</td>
+        <td><span class="chip ${PERMIT_CHIP[n.permitStatus] || 'chip-amber'}">${_cgEsc(n.permitStatus || 'Under review')}</span></td>
+        <td style="white-space:nowrap"><span class="status ${n.statusClass}">${CHAIN_STATUS_LABEL[n.status] || n.status}</span>
+          <button class="btn btn-ghost" style="padding:3px 10px;font-size:11px;margin-left:8px" onclick="removeChainLink(${n.id})">Fjern</button></td>
+      </tr>`).join('')
+      : '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text-30)">Ingen underentreprenører tilknyttet endnu</td></tr>';
+  }
+}
+
+async function removeChainLink(linkId) {
+  if (!_activeCase) return;
+  if (!confirm('Fjern dette led (og alle underliggende led) fra kæden?')) return;
+  try {
+    const r = await fetch(`/api/cases/${_activeCase.id}/subcontractors/${linkId}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await fetchCaseChain();
+    showToast('Led fjernet', 'Underentreprenøren er fjernet fra kæden.', 'amber');
+  } catch(e) {
+    showToast('Fejl', 'Leddet kunne ikke fjernes.', 'red');
+  }
+}
+
+// ── Tilknyt underentreprenør ─────────────────────────────────
+async function openAddSubModal() {
+  if (!_casesApiOn) {
+    showToast('Kræver backend', 'Tilknytning af underentreprenører kræver at serveren kører.', 'amber');
+    return;
+  }
+  if (!_activeCase) {
+    showToast('Vælg projekt først', 'Vælg eller opret et projekt i topbaren ("Alle projekter").', 'amber');
+    toggleCaseDropdown();
+    return;
+  }
+
+  // Hent DB-leverandører (kun disse kan tilknyttes)
+  let dbSuppliers = [];
+  try {
+    const r = await fetch('/api/suppliers');
+    if (r.ok) dbSuppliers = await r.json();
+  } catch(e) {}
+  if (!dbSuppliers.length) {
+    showToast('Ingen leverandører', 'Opret først en leverandør via CVR-søgningen på Dashboard.', 'amber');
+    return;
+  }
+
+  const parentOpts = ['<option value="">Øverste led — direkte under bygherre (Tier 1)</option>']
+    .concat(_chainFlat.map(n => `<option value="${n.id}">${_cgEsc(n.name)} (Tier ${n.tier}) → nyt led bliver Tier ${n.tier + 1}</option>`))
+    .join('');
+  const supplierOpts = dbSuppliers.map(s => `<option value="${s.id}">${_cgEsc(s.name)}${s.country && s.country !== 'Danmark' ? ' · ' + _cgEsc(s.country) : ''}</option>`).join('');
+
+  let overlay = document.getElementById('addsub-modal-overlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'addsub-modal-overlay';
+  overlay.className = 'simple-modal-overlay open';
+  overlay.innerHTML = `
+    <div class="simple-modal">
+      <div class="sm-head">
+        <span class="sm-title">Tilknyt underentreprenør — ${_cgEsc(_activeCase.name)}</span>
+        <button class="drawer-close" onclick="document.getElementById('addsub-modal-overlay').remove()">✕</button>
+      </div>
+      <div class="sm-body">
+        <div><div class="sm-label">Leverandør *</div>
+          <select class="sm-select" id="addsub-supplier">${supplierOpts}</select>
+        </div>
+        <div><div class="sm-label">Placering i kæden</div>
+          <select class="sm-select" id="addsub-parent">${parentOpts}</select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><div class="sm-label">Rolle / aktivitet</div><input class="sm-input" id="addsub-activity" placeholder="F.eks. Betonarbejde"/></div>
+          <div><div class="sm-label">Ansatte på site</div><input class="sm-input" id="addsub-employees" type="number" min="0" placeholder="F.eks. 12"/></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><div class="sm-label">Arbejdstilladelse</div>
+            <select class="sm-select" id="addsub-permit">
+              <option value="Godkendt">Godkendt</option>
+              <option value="Under review" selected>Under review</option>
+              <option value="Mangler">Mangler</option>
+            </select>
+          </div>
+          <div><div class="sm-label">Status</div>
+            <select class="sm-select" id="addsub-status">
+              <option value="pending" selected>Afventer</option>
+              <option value="approved">Godkendt</option>
+              <option value="blocked">Blokeret</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="sm-foot">
+        <button class="btn btn-ghost" onclick="document.getElementById('addsub-modal-overlay').remove()">Annuller</button>
+        <button class="btn btn-primary" onclick="submitAddSub()">Tilknyt</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', function(e){ if (e.target === this) this.remove(); });
+  document.body.appendChild(overlay);
+}
+
+async function submitAddSub() {
+  const payload = {
+    supplierId: parseInt(document.getElementById('addsub-supplier').value, 10),
+    parentId: parseInt(document.getElementById('addsub-parent').value, 10) || null,
+    activity: document.getElementById('addsub-activity').value.trim() || null,
+    employeesOnSite: parseInt(document.getElementById('addsub-employees').value, 10) || null,
+    permitStatus: document.getElementById('addsub-permit').value,
+    status: document.getElementById('addsub-status').value,
+  };
+  try {
+    const r = await fetch(`/api/cases/${_activeCase.id}/subcontractors`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error((await r.json()).error || 'HTTP ' + r.status);
+    const node = await r.json();
+    document.getElementById('addsub-modal-overlay').remove();
+    const c = CASES.find(x => x.id === _activeCase.id);
+    if (c) c.subcontractorCount = (c.subcontractorCount || 0) + 1;
+    await fetchCaseChain();
+    navigateTo('subcontractors');
+    showToast('Underentreprenør tilknyttet', `${node.name} er tilføjet som Tier ${node.tier}.`, 'green');
+  } catch(e) {
+    showToast('Fejl', 'Kunne ikke tilknytte: ' + e.message, 'red');
   }
 }
 

@@ -201,6 +201,7 @@ async function init() {
     `ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS score        INTEGER      DEFAULT 50`,
     `ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS status_class VARCHAR(20)  DEFAULT 's-amber'`,
     `ALTER TABLE suppliers ALTER COLUMN status TYPE VARCHAR(50)`,
+    `ALTER TABLE suppliers ALTER COLUMN cvr DROP NOT NULL`,
     // documents — tilføj user_id og nye kolonner til eksisterende tabel
     `ALTER TABLE documents ADD COLUMN IF NOT EXISTS user_id    INTEGER`,
     `ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_size  VARCHAR(20)`,

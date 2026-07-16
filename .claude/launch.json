@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "chainguard",
+      "runtimeExecutable": "railway",
+      "runtimeArgs": ["run", "node", "server.js"],
+      "port": 3000
+    }
+  ]
+}
