@@ -234,6 +234,8 @@ html.light .theme-toggle .icon-moon { display:none; }
 .row-3-2 { grid-template-columns:1fr 320px; }
 .row-half { grid-template-columns:1fr 1fr; }
 .row-3col { grid-template-columns:1fr 1fr 1fr; }
+.row-4col { grid-template-columns:repeat(4,1fr); }
+@media (max-width:1100px){ .row-4col { grid-template-columns:1fr 1fr; } }
 
 /* ── CARD ── */
 .card {
@@ -1020,6 +1022,10 @@ Aarhus Havnefront</div>
           Udløber snart
           <span class="nav-badge nb-amber">12</span>
         </div>
+        <div class="nav-link" data-page="payroll">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3.5A1.5 1.5 0 013.5 2h9A1.5 1.5 0 0114 3.5v9a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9zM4.5 5h7v1.2h-7V5zm0 3h4.5v1.2H4.5V8zm0 3h6v1.2h-6V11z"/></svg>
+          Lønkontrol
+        </div>
         <div class="nav-link" data-page="compliance-check">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 2.5h-11a.5.5 0 00-.5.5v10a.5.5 0 00.5.5h11a.5.5 0 00.5-.5V3a.5.5 0 00-.5-.5zM6.5 11l-2.5-2.5 1-1L6.5 9l4-4 1 1L6.5 11z"/></svg>
           Compliance-tjek
@@ -1745,6 +1751,90 @@ Aarhus Havnefront</div>
     <!-- ══════════════════════════════════
          PAGE: ESG DUE DILIGENCE
     ══════════════════════════════════ -->
+    <!-- ══════════════════════════════════
+         PAGE: LØNKONTROL
+    ══════════════════════════════════ -->
+    <style>
+      .pay-chain { display:flex;align-items:center;flex-wrap:wrap;gap:0;padding:16px 22px; }
+      .pay-node { border:1px solid var(--border-med);border-radius:var(--r-sm);padding:7px 13px;font-size:12px;font-weight:700;color:var(--text-80);background:var(--bg-card);white-space:nowrap; }
+      .pay-arrow { color:var(--text-30);padding:0 10px;font-size:13px; }
+      .pay-srcgrid { display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px; }
+      @media (max-width:900px){ .pay-srcgrid{grid-template-columns:repeat(2,1fr)} }
+      .pay-src { border:1px solid var(--border);border-radius:var(--r-sm);padding:11px 13px;background:var(--bg-card); }
+      .pay-src.bad { border-color:var(--red-ring);background:var(--red-dim); }
+      .pay-src-l { font-size:10px;font-weight:700;letter-spacing:0.7px;text-transform:uppercase;color:var(--text-30); }
+      .pay-src-v { font-size:14.5px;font-weight:700;color:var(--text-100);margin-top:5px;font-variant-numeric:tabular-nums; }
+      .pay-src.bad .pay-src-v { color:var(--red); }
+      .pay-src-m { font-size:11px;color:var(--text-50);margin-top:3px; }
+      .pay-exp { background:rgba(0,0,0,0.14);padding:16px 22px; }
+      html.light .pay-exp { background:rgba(0,0,0,0.035); }
+      .pay-why { display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:var(--text-80);line-height:1.6;padding:9px 0;border-top:1px solid var(--border); }
+      .pay-why:first-of-type { border-top:none; }
+      .pay-masked { color:var(--text-30);letter-spacing:2px; }
+      .pay-num { font-variant-numeric:tabular-nums; }
+      .pay-rowbtn { background:none;border:none;color:var(--violet-l);font-size:11px;font-weight:700;cursor:pointer;padding:0; }
+    </style>
+    <div class="page-view" id="page-payroll">
+      <div class="section-head">
+        <div>
+          <div class="section-title">Lønkontrol</div>
+          <div class="section-sub">Fra udført arbejde til udbetalt krone — fire kilder sammenholdt pr. medarbejder</div>
+        </div>
+        <button class="btn btn-primary" onclick="openPayrollImport()">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="white"><path d="M8 1a.75.75 0 01.75.75V7.25h5.5a.75.75 0 010 1.5H8.75v5.5a.75.75 0 01-1.5 0V8.75H1.75a.75.75 0 010-1.5H7.25V1.75A.75.75 0 018 1z"/></svg>
+          Indlæs lønperiode
+        </button>
+      </div>
+
+      <div class="card pay-chain" style="margin-bottom:22px">
+        <span class="pay-node">Tidsregistrering</span><span class="pay-arrow">→</span>
+        <span class="pay-node">Lønseddel</span><span class="pay-arrow">→</span>
+        <span class="pay-node">Indberetning</span><span class="pay-arrow">→</span>
+        <span class="pay-node">Bankudbetaling</span><span class="pay-arrow">→</span>
+        <span class="pay-node">Lønregel</span>
+      </div>
+
+      <div class="row row-4col" id="pay-stats" style="margin-bottom:22px"></div>
+
+      <div class="filter-row" style="align-items:center;gap:10px;flex-wrap:wrap">
+        <select class="sm-select" id="pay-period-select" style="max-width:340px" onchange="selectPayrollPeriod(this.value)">
+          <option value="">Ingen lønperioder indlæst</option>
+        </select>
+        <button class="filter-btn active" onclick="setPayrollView('supplier',this)">Leverandør</button>
+        <button class="filter-btn" onclick="setPayrollView('main',this)">Hovedvirksomhed</button>
+        <button class="filter-btn" onclick="setPayrollView('controller',this)">Kontrollør</button>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="exportPayrollCSV()">Eksportér</button>
+          <button class="btn btn-primary" id="pay-check-btn" onclick="runPayrollCheck()">Kør lønkontrol</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-head" style="cursor:default">
+          <div class="card-title" id="pay-table-title">Medarbejdere</div>
+          <span class="tag" id="pay-view-note" style="flex-shrink:0">Fulde løndata</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Medarbejder</th><th>Faggruppe</th><th style="text-align:right">Timer</th>
+              <th style="text-align:right">Nettoløn</th><th>Indberettet</th>
+              <th style="text-align:right">Udbetalt</th><th>Status</th>
+            </tr></thead>
+            <tbody id="pay-lines"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head" style="cursor:default">
+          <div class="card-title">Afvigelser</div>
+          <span class="tag" id="pay-rule-note" style="flex-shrink:0">—</span>
+        </div>
+        <div id="pay-deviations" style="padding:8px"></div>
+      </div>
+    </div>
+
     <div class="page-view" id="page-esg">
       <div class="section-head">
         <div><div class="section-title">ESG Due Diligence</div><div class="section-sub">Bæredygtighed og socialt ansvar i leverandørkæden</div></div>
@@ -3276,6 +3366,7 @@ const PAGE_META = {
   'docbank':           { title:'Dokumentbank',        breadcrumb:'248 dokumenter',     action:'Upload',    primary:'Upload dokument' },
   'expiring':          { title:'Udløber snart',       breadcrumb:'12 dokumenter',      action:'Eksportér', primary:'Send påmindelser' },
   'compliance-check':  { title:'Compliance-tjek',     breadcrumb:'Seneste gennemgang', action:'Eksportér', primary:'Kør gennemgang' },
+  'payroll':           { title:'Lønkontrol',          breadcrumb:'Timer · løn · indberetning · bank', action:'Eksportér', primary:'Indlæs lønperiode' },
   'esg':               { title:'ESG Due Diligence',   breadcrumb:'Bæredygtighed',      action:'Eksportér', primary:'Send ESG-skema' },
   'export':            { title:'Eksport',             breadcrumb:'Rapporter & data',   action:'Indstillinger', primary:'Planlæg rapport' },
 };
@@ -3316,6 +3407,8 @@ function handleTopbarAction() {
   const page = document.querySelector('.nav-link.active')?.dataset.page || 'dashboard';
   if (page === 'export' || page === 'dashboard') {
     navigateTo('export');
+  } else if (page === 'payroll') {
+    exportPayrollCSV();
   } else if (page === 'docbank') {
     simulateUpload();
   } else {
@@ -3334,6 +3427,8 @@ function handleTopbarPrimary() {
     }, 100);
   } else if (page === 'deviations') {
     openDeviationModal();
+  } else if (page === 'payroll') {
+    openPayrollImport();
   } else if (page === 'esg') {
     openEsgModal();
   } else if (page === 'expiring') {
@@ -6306,6 +6401,380 @@ navigateTo = function(page) {
 // Kør ved første load
 renderRiskPage();
 renderSubsPage();
+
+// ══════════════════════════════════════════════════════════════
+// LØNKONTROL
+// Sammenholder tidsregistrering, lønsystem, indberetning og bank.
+// Regelmotoren kører serverside (payroll.js) — her vises kun resultatet.
+// ══════════════════════════════════════════════════════════════
+const PAYROLL = { periods: [], current: null, view: 'supplier', openLine: null };
+
+const payKr = v => v == null
+  ? '<span class="pay-masked">••••••</span>'
+  : Number(v).toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const payNum = v => Number(v || 0).toLocaleString('da-DK', { maximumFractionDigits: 2 });
+const payDate = d => d ? new Date(d).toLocaleDateString('da-DK') : '—';
+const payEsc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function loadPayrollPeriods(selectId) {
+  try {
+    const r = await fetch('/api/payroll/periods', { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) throw new Error('Kunne ikke hente lønperioder.');
+    PAYROLL.periods = await r.json();
+  } catch (e) {
+    PAYROLL.periods = [];
+  }
+  const sel = document.getElementById('pay-period-select');
+  if (!sel) return;
+  sel.innerHTML = PAYROLL.periods.length
+    ? PAYROLL.periods.map(p =>
+        `<option value="${p.id}">${payEsc(p.supplierName)} · ${payDate(p.periodStart)} – ${payDate(p.periodEnd)}</option>`
+      ).join('')
+    : '<option value="">Ingen lønperioder indlæst</option>';
+
+  const target = selectId || (PAYROLL.current && PAYROLL.current.period.id) || (PAYROLL.periods[0] && PAYROLL.periods[0].id);
+  if (target) { sel.value = String(target); await selectPayrollPeriod(target); }
+  else renderPayroll();
+}
+
+async function selectPayrollPeriod(id) {
+  if (!id) { PAYROLL.current = null; renderPayroll(); return; }
+  try {
+    const r = await fetch(`/api/payroll/periods/${id}?view=${PAYROLL.view}`, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) throw new Error('Lønperioden kunne ikke hentes.');
+    PAYROLL.current = await r.json();
+    PAYROLL.openLine = null;
+  } catch (e) {
+    PAYROLL.current = null;
+    showToast('Kunne ikke hente lønperioden', e.message, 'red');
+  }
+  renderPayroll();
+}
+
+function setPayrollView(view, btn) {
+  PAYROLL.view = view;
+  document.querySelectorAll('#page-payroll .filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+  if (PAYROLL.current) selectPayrollPeriod(PAYROLL.current.period.id);
+  else renderPayroll();
+}
+
+function renderPayroll() {
+  const cur = PAYROLL.current;
+  const stats = document.getElementById('pay-stats');
+  const body  = document.getElementById('pay-lines');
+  const devs  = document.getElementById('pay-deviations');
+  if (!stats || !body || !devs) return;
+
+  const viewNote = { supplier: 'Fulde løndata', main: 'Beløb udeladt — kun kontrolresultat', controller: 'Fulde løndata · sagsbehandling' }[PAYROLL.view];
+  document.getElementById('pay-view-note').textContent = viewNote;
+
+  if (!cur) {
+    stats.innerHTML = '';
+    body.innerHTML = `<tr><td colspan="7" style="padding:0">
+      <div class="empty-state">
+        <div class="empty-title">Ingen lønperiode valgt</div>
+        <div class="empty-desc">Indlæs en lønperiode for at sammenholde timer, lønsedler, indberetning og bankudbetalinger.</div>
+      </div></td></tr>`;
+    devs.innerHTML = '';
+    document.getElementById('pay-rule-note').textContent = '—';
+    document.getElementById('pay-table-title').textContent = 'Medarbejdere';
+    return;
+  }
+
+  const open = cur.deviations.filter(d => !d.resolvedAt);
+  const critical = open.filter(d => d.severity === 'critical');
+  const unpaid = cur.lines.filter(l => l.inPayroll && !l.netPaid).length;
+
+  stats.innerHTML = `
+    <div class="stat-card"><div class="stat-label">Medarbejdere kontrolleret</div>
+      <div class="stat-val">${cur.lines.length}</div>
+      <div class="stat-sub">${payDate(cur.period.periodStart)} – ${payDate(cur.period.periodEnd)}</div></div>
+    <div class="stat-card" style="border-color:var(--red-ring)"><div class="stat-label">Kritiske afvigelser</div>
+      <div class="stat-val red">${critical.length}</div>
+      <div class="stat-sub">Overstyrer den samlede status</div></div>
+    <div class="stat-card" style="border-color:${unpaid ? 'var(--red-ring)' : 'var(--green-ring)'}"><div class="stat-label">Nettoløn ikke udbetalt</div>
+      <div class="stat-val" style="color:${unpaid ? 'var(--red)' : 'var(--green)'}">${unpaid}</div>
+      <div class="stat-sub">Lønseddel uden bankmatch</div></div>
+    <div class="stat-card"><div class="stat-label">Samlet status</div>
+      <div style="margin-top:8px"><span class="status ${cur.period.statusClass}">${cur.period.statusLabel}</span></div>
+      <div class="stat-sub" style="margin-top:6px">${cur.period.checkedAt ? 'Kontrolleret ' + payDate(cur.period.checkedAt) : 'Ikke kontrolleret endnu'}</div></div>`;
+
+  document.getElementById('pay-table-title').textContent =
+    `${cur.period.supplierName} · ${cur.lines.length} medarbejder${cur.lines.length === 1 ? '' : 'e'}`;
+  document.getElementById('pay-rule-note').textContent =
+    `${cur.ruleset.name} ${cur.ruleset.version}`;
+
+  body.innerHTML = cur.lines.map(l => {
+    const paidCell = l.masked
+      ? (l.netPaid ? 'Ja' : '<span style="color:var(--red);font-weight:700">Nej</span>')
+      : (l.bankPaid != null && Number(l.bankPaid) === 0
+          ? '<span style="color:var(--red);font-weight:700">0,00</span>'
+          : `<span class="pay-num">${payKr(l.bankPaid)}</span>`);
+    const row = `
+      <tr onclick="togglePayrollLine(${l.id})" style="cursor:pointer">
+        <td><div class="td-name">${payEsc(l.pseudonym)}</div><div class="td-meta">${l.masked ? 'Pseudonym' : payEsc(l.employeeRef || 'Pseudonym')}</div></td>
+        <td>${payEsc(l.jobGroup || '—')}</td>
+        <td style="text-align:right" class="pay-num">${payNum(l.hoursNormal + l.hoursOvertime)}</td>
+        <td style="text-align:right" class="pay-num">${l.net == null && !l.masked ? '—' : payKr(l.net)}</td>
+        <td>${l.reported ? 'Ja' : '<span style="color:var(--red);font-weight:700">Nej</span>'}</td>
+        <td style="text-align:right">${paidCell}</td>
+        <td><span class="status ${l.statusClass}">${l.statusLabel}</span></td>
+      </tr>`;
+    return row + (PAYROLL.openLine === l.id ? payrollLineDetail(l) : '');
+  }).join('');
+
+  devs.innerHTML = open.length
+    ? open.map(d => `
+      <div class="deviation-card">
+        <div class="dev-top">
+          <div>
+            <div class="dev-title">${payEsc(d.label)}</div>
+            <div class="dev-meta">${payEsc(d.pseudonym || '—')} · regelversion ${payEsc(d.rulesetVersion || '—')} · kontrolleret ${payDate(d.checkedAt)}</div>
+          </div>
+          <span class="chip ${d.severity === 'critical' ? 'chip-red' : 'chip-amber'}">${d.severity === 'critical' ? 'Kritisk' : 'Afvigelse'}</span>
+        </div>
+        <div class="dev-body">${payEsc(d.detail)}</div>
+        ${PAYROLL.view === 'controller' ? `<div class="dev-footer">
+          <span class="tag">${payEsc(d.code)}</span>
+          <button class="btn btn-ghost" style="padding:5px 14px;font-size:12px" onclick="resolvePayrollDeviation(${d.id})">Markér som behandlet</button>
+        </div>` : `<div class="dev-footer"><span class="tag">${payEsc(d.code)}</span></div>`}
+      </div>`).join('')
+    : `<div class="empty-state">
+        <div class="empty-title">${cur.period.checkedAt ? 'Ingen åbne afvigelser' : 'Kontrollen er ikke kørt endnu'}</div>
+        <div class="empty-desc">${cur.period.checkedAt ? 'Alle fire kilder hænger sammen for denne lønperiode.' : 'Kør lønkontrollen for at sammenholde de fire kilder.'}</div>
+      </div>`;
+}
+
+// Den udfoldede række: de fire kilder side om side, og hvorfor status er som den er.
+function payrollLineDetail(l) {
+  const cur = PAYROLL.current;
+  const mine = cur.deviations.filter(d => d.lineId === l.id && !d.resolvedAt);
+  const hours = l.hoursNormal + l.hoursOvertime;
+  const bad = code => mine.some(d => d.code === code);
+
+  const src = (label, value, meta, isBad) => `
+    <div class="pay-src${isBad ? ' bad' : ''}">
+      <div class="pay-src-l">${label}</div>
+      <div class="pay-src-v">${value}</div>
+      <div class="pay-src-m">${meta}</div>
+    </div>`;
+
+  return `<tr><td colspan="7" style="padding:0"><div class="pay-exp">
+    <div class="pay-srcgrid">
+      ${src('1 · Tidsregistrering', payNum(hours) + ' t',
+            l.onProject ? 'Registreret på projektet' : 'Ikke henført til projektet',
+            bad('NOT_IN_PAYROLL') || bad('NOT_ON_PROJECT'))}
+      ${src('2 · Lønsystem',
+            l.inPayroll ? (l.masked ? 'Lønseddel findes' : payKr(l.net) + ' netto') : 'Ingen lønseddel',
+            l.inPayroll
+              ? (l.masked ? 'Beløb udeladt i denne visning' : 'Brutto ' + payKr(l.gross))
+              : 'Medarbejderen findes ikke i lønsystemet',
+            !l.inPayroll)}
+      ${src('3 · Indberetning', l.reported ? 'Indberettet' : 'Ikke indberettet',
+            l.reported ? 'Lønperioden er indberettet' : 'Mangler i indberetningen',
+            !l.reported)}
+      ${src('4 · Bank',
+            l.masked ? (l.netPaid ? 'Udbetalt' : 'Ikke udbetalt')
+                     : (l.bankPaid == null ? 'Ingen postering' : (Number(l.bankPaid) === 0 ? 'Ikke udbetalt' : payKr(l.bankPaid))),
+            bad('SHARED_BANK_ACCOUNT') ? 'Delt konto' + (l.bankLast4 ? ' ••••' + l.bankLast4 : '')
+              : (l.bankPaidAt ? 'Udbetalt ' + payDate(l.bankPaidAt) : 'Ingen udbetalingsdato'),
+            bad('NET_NOT_PAID') || bad('BANK_MISMATCH') || bad('SHARED_BANK_ACCOUNT'))}
+    </div>
+    ${mine.length
+      ? mine.map(d => `<div class="pay-why">
+          <span class="chip ${d.severity === 'critical' ? 'chip-red' : 'chip-amber'}" style="flex-shrink:0">${d.severity === 'critical' ? 'Kritisk' : 'Afvigelse'}</span>
+          <span><strong style="color:var(--text-100)">${payEsc(d.label)}.</strong> ${payEsc(d.detail)}</span>
+        </div>`).join('')
+      : `<div class="pay-why">
+          <span class="chip chip-green" style="flex-shrink:0">Grøn</span>
+          <span>${cur.period.checkedAt
+            ? 'Alle fire kilder stemmer. Timer, lønseddel, indberetning og udbetaling hænger sammen.'
+            : 'Kontrollen er ikke kørt for denne lønperiode endnu.'}</span>
+        </div>`}
+  </div></td></tr>`;
+}
+
+function togglePayrollLine(id) {
+  PAYROLL.openLine = PAYROLL.openLine === id ? null : id;
+  renderPayroll();
+}
+
+async function runPayrollCheck() {
+  if (!PAYROLL.current) { showToast('Ingen lønperiode valgt', 'Indlæs en lønperiode først.', 'amber'); return; }
+  const btn = document.getElementById('pay-check-btn');
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Kontrollerer…';
+  try {
+    const r = await fetch(`/api/payroll/periods/${PAYROLL.current.period.id}/check`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Kontrollen kunne ikke gennemføres.');
+    showToast(data.statusLabel,
+      `${data.employees} medarbejdere · ${data.deviations} afvigelser (${data.critical} kritiske) · regelversion ${data.rulesetVersion}`,
+      data.status === 'green' ? 'green' : data.status === 'red' ? 'red' : 'amber', 5000);
+    await selectPayrollPeriod(PAYROLL.current.period.id);
+    await loadPayrollPeriods(PAYROLL.current.period.id);
+  } catch (e) {
+    showToast('Kontrollen fejlede', e.message, 'red');
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+async function resolvePayrollDeviation(id) {
+  const resolution = prompt('Begrundelse for at lukke afvigelsen:');
+  if (!resolution || !resolution.trim()) return;
+  try {
+    const r = await fetch('/api/payroll/deviations/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resolution: resolution.trim() }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Afvigelsen kunne ikke lukkes.');
+    showToast('Afvigelse behandlet', 'Status er nu: ' + data.statusLabel, 'green');
+    await selectPayrollPeriod(PAYROLL.current.period.id);
+  } catch (e) {
+    showToast('Kunne ikke lukke afvigelsen', e.message, 'red');
+  }
+}
+
+function exportPayrollCSV() {
+  if (!PAYROLL.current) { showToast('Ingen lønperiode valgt', 'Vælg en lønperiode først.', 'amber'); return; }
+  window.location.href = `/api/export/csv/payroll?periodId=${PAYROLL.current.period.id}&view=${PAYROLL.view}`;
+}
+
+// ── Import af lønperiode ───────────────────────────────────────
+// Leverandørerne hentes fra serveren, ikke fra SUPPLIERS-arrayet: det
+// indeholder også demo-rækker, hvis id'er ikke svarer til databasens.
+async function openPayrollImport() {
+  const sel = document.getElementById('pay-import-supplier');
+  sel.innerHTML = '<option value="">Henter leverandører…</option>';
+  document.getElementById('pay-import-csv').value = '';
+  document.getElementById('pay-import-overlay').classList.add('open');
+  try {
+    const r = await fetch('/api/suppliers', { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) throw new Error('Leverandørerne kunne ikke hentes.');
+    const rows = await r.json();
+    sel.innerHTML = rows.length
+      ? rows.map(s => `<option value="${s.id}">${payEsc(s.name)}${s.cvr && s.cvr !== '—' ? ' · ' + payEsc(s.cvr) : ''}</option>`).join('')
+      : '<option value="">Opret en leverandør først</option>';
+  } catch (e) {
+    sel.innerHTML = '<option value="">Kunne ikke hente leverandører</option>';
+    showToast('Kunne ikke hente leverandører', e.message, 'red');
+  }
+}
+
+function closePayrollImport() {
+  document.getElementById('pay-import-overlay').classList.remove('open');
+}
+
+function payrollTemplate() {
+  const csv = [
+    'medarbejder;faggruppe;ansat_fra;timer_normal;timer_overtid;brutto;netto;tillaeg;pension;feriepenge;indberettet;bank_konto;bank_betalt;bank_dato',
+    'E-101;Tømrer;2026-01-15;160,5;0;31.410,00;21.847,00;0;3.769,00;3.926,00;ja;5479 0001234567;21.847,00;2026-07-31',
+  ].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,﻿' + encodeURIComponent(csv);
+  a.download = 'chainguard-loenimport-skabelon.csv';
+  a.click();
+}
+
+function payrollFilePicked(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { document.getElementById('pay-import-csv').value = reader.result; };
+  reader.readAsText(file, 'utf-8');
+}
+
+async function submitPayrollImport() {
+  const supplierId = document.getElementById('pay-import-supplier').value;
+  const start = document.getElementById('pay-import-start').value;
+  const end   = document.getElementById('pay-import-end').value;
+  const payout = document.getElementById('pay-import-payout').value;
+  const csv   = document.getElementById('pay-import-csv').value;
+
+  if (!supplierId) { showToast('Vælg leverandør', 'Lønperioden skal knyttes til en leverandør.', 'red'); return; }
+  if (!start || !end) { showToast('Angiv lønperiode', 'Både start- og slutdato er påkrævet.', 'red'); return; }
+  if (!csv.trim()) { showToast('Ingen løndata', 'Indsæt CSV-data eller vælg en fil.', 'red'); return; }
+
+  try {
+    const pr = await fetch('/api/payroll/periods', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supplierId: Number(supplierId), periodStart: start, periodEnd: end, payoutDate: payout || null }),
+    });
+    const period = await pr.json();
+    if (!pr.ok) throw new Error(period.error || 'Lønperioden kunne ikke oprettes.');
+
+    const ir = await fetch(`/api/payroll/periods/${period.id}/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv }),
+    });
+    const imported = await ir.json();
+    if (!ir.ok) throw new Error(imported.error || 'Løndata kunne ikke indlæses.');
+
+    closePayrollImport();
+    showToast('Lønperiode indlæst',
+      `${imported.imported} lønlinjer · ${imported.newEmployees} nye medarbejdere`, 'green');
+    if (imported.warnings && imported.warnings.length) {
+      showToast('Bemærkninger ved import', imported.warnings.slice(0, 2).join(' '), 'amber', 6000);
+    }
+    await loadPayrollPeriods(period.id);
+    await runPayrollCheck();
+  } catch (e) {
+    showToast('Import fejlede', e.message, 'red');
+  }
+}
+
+document.body.insertAdjacentHTML('beforeend', `
+  <div class="simple-modal-overlay" id="pay-import-overlay">
+    <div class="simple-modal">
+      <div class="sm-head">
+        <span class="sm-title">Indlæs lønperiode</span>
+        <button class="drawer-close" onclick="closePayrollImport()">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+        </button>
+      </div>
+      <div class="sm-body">
+        <div><div class="sm-label">Leverandør *</div>
+          <select class="sm-select" id="pay-import-supplier"></select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div><div class="sm-label">Periode fra *</div><input class="sm-input" type="date" id="pay-import-start"/></div>
+          <div><div class="sm-label">Periode til *</div><input class="sm-input" type="date" id="pay-import-end"/></div>
+          <div><div class="sm-label">Udbetalt</div><input class="sm-input" type="date" id="pay-import-payout"/></div>
+        </div>
+        <div>
+          <div class="sm-label">Løndata (CSV fra lønsystemet)</div>
+          <textarea class="sm-textarea" id="pay-import-csv" style="min-height:120px;font-family:ui-monospace,monospace;font-size:12px" placeholder="medarbejder;faggruppe;timer_normal;brutto;netto;indberettet;bank_konto;bank_betalt…"></textarea>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+            <input type="file" accept=".csv,text/csv" id="pay-import-file" onchange="payrollFilePicked(this)" style="font-size:12px;color:var(--text-50)"/>
+            <button class="pay-rowbtn" onclick="payrollTemplate()">Hent skabelon</button>
+          </div>
+          <div style="font-size:11.5px;color:var(--text-30);margin-top:8px;line-height:1.6">
+            Kontonumre gemmes ikke. Der gemmes kun de sidste fire cifre og et hash, så det kan opdages,
+            at flere ansatte får løn på samme konto.
+          </div>
+        </div>
+      </div>
+      <div class="sm-foot">
+        <button class="btn btn-ghost" onclick="closePayrollImport()">Annuller</button>
+        <button class="btn btn-primary" onclick="submitPayrollImport()">Indlæs og kontrollér</button>
+      </div>
+    </div>
+  </div>`);
+
+document.getElementById('pay-import-overlay').addEventListener('click', function (e) {
+  if (e.target === this) closePayrollImport();
+});
+
+var _navBeforePayroll = navigateTo;
+navigateTo = function (page) {
+  _navBeforePayroll(page);
+  if (page === 'payroll') loadPayrollPeriods();
+};
 </script>
 </body>
 </html>

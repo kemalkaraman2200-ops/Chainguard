@@ -2,7 +2,7 @@ const { Pool } = require('pg');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.PGNOSSL ? false : { rejectUnauthorized: false },
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
@@ -185,6 +185,122 @@ async function init() {
     )
   `);
 
+  // ── LØNKONTROL ──────────────────────────────────────────────
+  // Regelbibliotek: satser og vilkår i versioneret form, så en lønkontrol
+  // altid kan reproduceres med den regelversion, der gjaldt i lønperioden.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payroll_rulesets (
+      id               SERIAL PRIMARY KEY,
+      user_id          INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      name             VARCHAR(255) NOT NULL,
+      version          VARCHAR(20)  NOT NULL,
+      basis            VARCHAR(30)  DEFAULT 'contract',
+      job_group        VARCHAR(100),
+      valid_from       DATE NOT NULL,
+      valid_to         DATE,
+      min_hourly       NUMERIC(10,2),
+      overtime_factor  NUMERIC(5,2)  DEFAULT 1.5,
+      pension_pct      NUMERIC(5,2),
+      holiday_pct      NUMERIC(5,2)  DEFAULT 12.5,
+      max_weekly_hours NUMERIC(5,2)  DEFAULT 48,
+      source           VARCHAR(255),
+      approved_by      VARCHAR(255),
+      created_at       TIMESTAMPTZ   DEFAULT NOW()
+    )
+  `);
+
+  // Pseudonymiseret medarbejderregister. Ingen CPR-numre og aldrig hele
+  // kontonummeret — kun de sidste fire cifre og et hash til at opdage,
+  // at flere ansatte får løn på samme konto.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payroll_employees (
+      id            SERIAL PRIMARY KEY,
+      user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      supplier_id   INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,
+      pseudonym     VARCHAR(20)  NOT NULL,
+      employee_ref  VARCHAR(50),
+      job_group     VARCHAR(100),
+      employed_from DATE,
+      employed_to   DATE,
+      bank_last4    VARCHAR(4),
+      bank_hash     VARCHAR(64),
+      created_at    TIMESTAMPTZ  DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ  DEFAULT NOW(),
+      UNIQUE (supplier_id, employee_ref)
+    )
+  `);
+
+  // Lønperiode pr. leverandør — og pr. projekt, hvis den er knyttet til en sag.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payroll_periods (
+      id              SERIAL PRIMARY KEY,
+      user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      supplier_id     INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,
+      case_id         INTEGER REFERENCES cases(id) ON DELETE SET NULL,
+      period_start    DATE NOT NULL,
+      period_end      DATE NOT NULL,
+      payout_date     DATE,
+      source          VARCHAR(50)  DEFAULT 'csv',
+      ruleset_id      INTEGER REFERENCES payroll_rulesets(id) ON DELETE SET NULL,
+      ruleset_version VARCHAR(20),
+      status          VARCHAR(20)  DEFAULT 'grey',
+      status_class    VARCHAR(20)  DEFAULT 's-gray',
+      checked_at      TIMESTAMPTZ,
+      imported_at     TIMESTAMPTZ  DEFAULT NOW()
+    )
+  `);
+
+  // Én linje pr. medarbejder pr. lønperiode. Kolonnerne holder de fire kilder
+  // adskilt: timer (tidsregistrering), løn (lønsystem), reported (indberetning)
+  // og bank_paid (bankudbetaling).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payroll_lines (
+      id              SERIAL PRIMARY KEY,
+      user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      period_id       INTEGER REFERENCES payroll_periods(id) ON DELETE CASCADE,
+      employee_id     INTEGER REFERENCES payroll_employees(id) ON DELETE CASCADE,
+      hours_normal    NUMERIC(8,2)  DEFAULT 0,
+      hours_overtime  NUMERIC(8,2)  DEFAULT 0,
+      hourly_rate     NUMERIC(10,2),
+      gross           NUMERIC(12,2),
+      net             NUMERIC(12,2),
+      supplement      NUMERIC(12,2) DEFAULT 0,
+      pension         NUMERIC(12,2) DEFAULT 0,
+      holiday_pay     NUMERIC(12,2) DEFAULT 0,
+      in_payroll      BOOLEAN       DEFAULT TRUE,
+      reported        BOOLEAN       DEFAULT FALSE,
+      reported_amount NUMERIC(12,2),
+      bank_paid       NUMERIC(12,2),
+      bank_paid_at    DATE,
+      on_project      BOOLEAN       DEFAULT TRUE,
+      status          VARCHAR(20)   DEFAULT 'grey',
+      status_class    VARCHAR(20)   DEFAULT 's-gray',
+      UNIQUE (period_id, employee_id)
+    )
+  `);
+
+  // Afvigelser fra lønkontrollen. Resultater rettes aldrig: en ny kontrol
+  // markerer de gamle som superseded og indsætter et nyt sæt.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payroll_deviations (
+      id              SERIAL PRIMARY KEY,
+      user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      period_id       INTEGER REFERENCES payroll_periods(id) ON DELETE CASCADE,
+      line_id         INTEGER REFERENCES payroll_lines(id) ON DELETE CASCADE,
+      employee_id     INTEGER REFERENCES payroll_employees(id) ON DELETE SET NULL,
+      code            VARCHAR(40)  NOT NULL,
+      label           VARCHAR(255) NOT NULL,
+      detail          TEXT,
+      severity        VARCHAR(20)  DEFAULT 'warning',
+      ruleset_version VARCHAR(20),
+      superseded      BOOLEAN      DEFAULT FALSE,
+      resolved_at     TIMESTAMPTZ,
+      resolved_by     VARCHAR(255),
+      resolution      TEXT,
+      checked_at      TIMESTAMPTZ  DEFAULT NOW()
+    )
+  `);
+
   // Opgrader eksisterende tabeller med nye kolonner (fejler stille hvis kolonnen allerede findes)
   const alters = [
     // users
@@ -231,6 +347,12 @@ async function init() {
     `CREATE INDEX IF NOT EXISTS idx_case_subs_parent  ON case_subcontractors(parent_id)`,
     `CREATE INDEX IF NOT EXISTS idx_case_subs_sup     ON case_subcontractors(supplier_id)`,
     `CREATE INDEX IF NOT EXISTS idx_apprentices_user   ON apprentices(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_pay_emp_sup      ON payroll_employees(supplier_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_pay_emp_hash     ON payroll_employees(bank_hash)`,
+    `CREATE INDEX IF NOT EXISTS idx_pay_periods_sup  ON payroll_periods(supplier_id, user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_pay_lines_period ON payroll_lines(period_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_pay_devs_period  ON payroll_deviations(period_id, superseded)`,
+    `CREATE INDEX IF NOT EXISTS idx_pay_rules_user   ON payroll_rulesets(user_id)`,
   ];
 
   // user_id-indeks på documents kun hvis kolonnen nu eksisterer

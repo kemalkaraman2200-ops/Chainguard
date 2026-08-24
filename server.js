@@ -11,6 +11,7 @@ const cron = require('node-cron');
 const Stripe = require('stripe');
 const multer = require('multer');
 const { pool, init, formatSupplier, calcRisk } = require('./db');
+const payroll = require('./payroll');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1405,6 +1406,460 @@ app.put('/api/apprentices/sync', requireAuth, async (req, res) => {
   }
 });
 
+// ── Lønkontrol API ──────────────────────────────────────────
+// Sammenholder tidsregistrering, lønsystem, indberetning og bank pr.
+// medarbejder. Regelmotoren ligger i payroll.js.
+
+// Hovedvirksomheden ser kontrolresultatet, ikke lønsedlen. Data tilhører den
+// bruger, der er logget ind, så 'main' er en visning af, hvad en kunde ville
+// få udleveret — den reelle adskillelse mellem hovedvirksomhed og leverandør
+// kræver rollemodellen fra specifikationens afsnit 2.
+function resolveView(req) {
+  const v = String(req.query.view || '').toLowerCase();
+  return ['main', 'supplier', 'controller'].includes(v) ? v : 'supplier';
+}
+
+async function ownPeriod(periodId, userId) {
+  const r = await pool.query(
+    `SELECT p.*, s.name AS supplier_name, s.country, c.name AS case_name
+       FROM payroll_periods p
+       LEFT JOIN suppliers s ON s.id = p.supplier_id
+       LEFT JOIN cases c     ON c.id = p.case_id
+      WHERE p.id=$1 AND p.user_id=$2`,
+    [periodId, userId]
+  );
+  return r.rows[0] || null;
+}
+
+async function periodLines(periodId) {
+  const r = await pool.query(
+    `SELECT l.*, e.pseudonym, e.employee_ref, e.job_group, e.employed_from,
+            e.employed_to, e.bank_last4, e.bank_hash
+       FROM payroll_lines l
+       JOIN payroll_employees e ON e.id = l.employee_id
+      WHERE l.period_id=$1
+      ORDER BY e.pseudonym`,
+    [periodId]
+  );
+  return r.rows;
+}
+
+// Find det regelsæt, der gjaldt i lønperioden — ikke det, der gælder i dag.
+async function rulesetFor(period, userId) {
+  if (period.ruleset_id) {
+    const r = await pool.query('SELECT * FROM payroll_rulesets WHERE id=$1 AND user_id=$2', [period.ruleset_id, userId]);
+    if (r.rows[0]) return r.rows[0];
+  }
+  const r = await pool.query(
+    `SELECT * FROM payroll_rulesets
+      WHERE user_id=$1 AND valid_from <= $2 AND (valid_to IS NULL OR valid_to >= $2)
+      ORDER BY valid_from DESC LIMIT 1`,
+    [userId, period.period_end]
+  );
+  return r.rows[0] || null;
+}
+
+function formatPeriod(row, extra = {}) {
+  const meta = payroll.STATUS_META[row.status] || payroll.STATUS_META.grey;
+  return {
+    id: row.id,
+    supplierId: row.supplier_id,
+    supplierName: row.supplier_name || '—',
+    caseId: row.case_id,
+    caseName: row.case_name || null,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    payoutDate: row.payout_date,
+    source: row.source,
+    rulesetVersion: row.ruleset_version,
+    status: row.status,
+    statusLabel: meta.label,
+    statusClass: meta.cls,
+    checkedAt: row.checked_at,
+    importedAt: row.imported_at,
+    ...extra,
+  };
+}
+
+// GET /api/payroll/periods — alle lønperioder, evt. filtreret på leverandør
+app.get('/api/payroll/periods', requireAuth, async (req, res) => {
+  try {
+    const params = [req.user.id];
+    let where = 'p.user_id=$1';
+    if (req.query.supplierId) { params.push(req.query.supplierId); where += ` AND p.supplier_id=$${params.length}`; }
+    const result = await pool.query(
+      `SELECT p.*, s.name AS supplier_name, c.name AS case_name,
+              (SELECT COUNT(*) FROM payroll_lines l WHERE l.period_id = p.id) AS employees,
+              (SELECT COUNT(*) FROM payroll_deviations d
+                WHERE d.period_id = p.id AND d.superseded = FALSE AND d.resolved_at IS NULL) AS open_deviations,
+              (SELECT COUNT(*) FROM payroll_deviations d
+                WHERE d.period_id = p.id AND d.superseded = FALSE AND d.resolved_at IS NULL
+                  AND d.severity = 'critical') AS critical_deviations
+         FROM payroll_periods p
+         LEFT JOIN suppliers s ON s.id = p.supplier_id
+         LEFT JOIN cases c     ON c.id = p.case_id
+        WHERE ${where}
+        ORDER BY p.period_start DESC, p.id DESC`,
+      params
+    );
+    res.json(result.rows.map(r => formatPeriod(r, {
+      employees: Number(r.employees),
+      openDeviations: Number(r.open_deviations),
+      criticalDeviations: Number(r.critical_deviations),
+    })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/payroll/periods — opret lønperiode
+app.post('/api/payroll/periods', requireAuth, async (req, res) => {
+  const { supplierId, caseId, periodStart, periodEnd, payoutDate, source, rulesetId } = req.body;
+  if (!supplierId)  return res.status(400).json({ error: 'Leverandør er påkrævet.' });
+  if (!periodStart || !periodEnd) return res.status(400).json({ error: 'Lønperiodens start og slut er påkrævet.' });
+  if (new Date(periodEnd) < new Date(periodStart)) {
+    return res.status(400).json({ error: 'Lønperioden slutter før den begynder.' });
+  }
+  try {
+    const sup = await pool.query('SELECT id FROM suppliers WHERE id=$1 AND user_id=$2', [supplierId, req.user.id]);
+    if (!sup.rows[0]) return res.status(404).json({ error: 'Leverandøren blev ikke fundet.' });
+
+    let rulesetVersion = null;
+    if (rulesetId) {
+      const rs = await pool.query('SELECT version FROM payroll_rulesets WHERE id=$1 AND user_id=$2', [rulesetId, req.user.id]);
+      rulesetVersion = rs.rows[0] ? rs.rows[0].version : null;
+    }
+
+    const result = await pool.query(
+      `INSERT INTO payroll_periods
+         (user_id, supplier_id, case_id, period_start, period_end, payout_date, source, ruleset_id, ruleset_version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [req.user.id, supplierId, caseId || null, periodStart, periodEnd, payoutDate || null,
+       source || 'csv', rulesetId || null, rulesetVersion]
+    );
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, supplierId, 'payroll_period_created', `Lønperiode ${periodStart} – ${periodEnd} oprettet`]
+    );
+    res.json(formatPeriod({ ...result.rows[0], supplier_name: null }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/payroll/periods/:id — lønperiode med linjer og afvigelser
+app.get('/api/payroll/periods/:id', requireAuth, async (req, res) => {
+  const view = resolveView(req);
+  try {
+    const period = await ownPeriod(req.params.id, req.user.id);
+    if (!period) return res.status(404).json({ error: 'Lønperioden blev ikke fundet.' });
+
+    const lines = await periodLines(period.id);
+    const devs = await pool.query(
+      `SELECT d.*, e.pseudonym FROM payroll_deviations d
+         LEFT JOIN payroll_employees e ON e.id = d.employee_id
+        WHERE d.period_id=$1 AND d.superseded = FALSE
+        ORDER BY CASE d.severity WHEN 'critical' THEN 0 ELSE 1 END, d.id`,
+      [period.id]
+    );
+    const ruleset = await rulesetFor(period, req.user.id);
+
+    const byLine = new Map();
+    for (const d of devs.rows) {
+      if (!byLine.has(d.line_id)) byLine.set(d.line_id, []);
+      byLine.get(d.line_id).push(d.code);
+    }
+
+    res.json({
+      period: formatPeriod(period),
+      view,
+      ruleset: ruleset
+        ? { id: ruleset.id, name: ruleset.name, version: ruleset.version, basis: ruleset.basis,
+            minHourly: ruleset.min_hourly, source: ruleset.source }
+        : { name: payroll.DEFAULT_RULESET.name, version: payroll.DEFAULT_RULESET.version, basis: 'contract',
+            minHourly: null, source: payroll.DEFAULT_RULESET.source },
+      lines: lines.map(l => {
+        const masked = payroll.maskLine(l, view);
+        const meta = payroll.STATUS_META[l.status] || payroll.STATUS_META.grey;
+        return {
+          id: l.id,
+          employeeId: l.employee_id,
+          pseudonym: l.pseudonym,
+          employeeRef: view === 'main' ? null : l.employee_ref,
+          jobGroup: l.job_group,
+          employedFrom: l.employed_from,
+          hoursNormal: Number(l.hours_normal || 0),
+          hoursOvertime: Number(l.hours_overtime || 0),
+          gross: masked.gross, net: masked.net, supplement: masked.supplement,
+          pension: masked.pension, holidayPay: masked.holiday_pay,
+          hourlyRate: masked.hourly_rate,
+          bankLast4: masked.bank_last4,
+          bankPaid: masked.bank_paid,
+          bankPaidAt: l.bank_paid_at,
+          netPaid: masked.masked ? masked.net_paid : (l.bank_paid != null && Number(l.bank_paid) > 0),
+          inPayroll: l.in_payroll,
+          reported: l.reported,
+          onProject: l.on_project,
+          masked: !!masked.masked,
+          status: l.status,
+          statusLabel: meta.label,
+          statusClass: meta.cls,
+          codes: byLine.get(l.id) || [],
+        };
+      }),
+      deviations: devs.rows.map(d => ({
+        id: d.id, code: d.code, label: d.label, detail: payroll.maskDetail(d.detail, view), severity: d.severity,
+        pseudonym: d.pseudonym, lineId: d.line_id, rulesetVersion: d.ruleset_version,
+        checkedAt: d.checked_at, resolvedAt: d.resolved_at, resolvedBy: d.resolved_by,
+        resolution: d.resolution,
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/payroll/periods/:id/import — indlæs løndata fra CSV
+app.post('/api/payroll/periods/:id/import', requireAuth, async (req, res) => {
+  const csv = req.body && req.body.csv;
+  if (!csv || !String(csv).trim()) return res.status(400).json({ error: 'Ingen data at indlæse.' });
+  try {
+    const period = await ownPeriod(req.params.id, req.user.id);
+    if (!period) return res.status(404).json({ error: 'Lønperioden blev ikke fundet.' });
+
+    const { rows, errors } = payroll.parseCSV(csv);
+    if (!rows.length) {
+      return res.status(400).json({ error: errors[0] || 'Filen indeholder ingen brugbare rækker.', errors });
+    }
+
+    let created = 0;
+    for (const row of rows) {
+      // Medarbejderen får et pseudonym ved første import og beholder det.
+      const existing = await pool.query(
+        'SELECT id, pseudonym FROM payroll_employees WHERE supplier_id=$1 AND employee_ref=$2',
+        [period.supplier_id, row.employee_ref]
+      );
+      let employeeId, pseudonym;
+      if (existing.rows[0]) {
+        employeeId = existing.rows[0].id;
+        pseudonym  = existing.rows[0].pseudonym;
+        await pool.query(
+          `UPDATE payroll_employees
+              SET job_group=COALESCE($1, job_group), employed_from=COALESCE($2, employed_from),
+                  employed_to=COALESCE($3, employed_to), bank_last4=COALESCE($4, bank_last4),
+                  bank_hash=COALESCE($5, bank_hash), updated_at=NOW()
+            WHERE id=$6`,
+          [row.job_group, row.employed_from, row.employed_to, row.bank_last4, row.bank_hash, employeeId]
+        );
+      } else {
+        const seq = await pool.query(
+          'SELECT COUNT(*)::int AS n FROM payroll_employees WHERE supplier_id=$1', [period.supplier_id]
+        );
+        pseudonym = 'MA-' + String(1000 + seq.rows[0].n + 1);
+        const ins = await pool.query(
+          `INSERT INTO payroll_employees
+             (user_id, supplier_id, pseudonym, employee_ref, job_group, employed_from, employed_to, bank_last4, bank_hash)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [req.user.id, period.supplier_id, pseudonym, row.employee_ref, row.job_group,
+           row.employed_from, row.employed_to, row.bank_last4, row.bank_hash]
+        );
+        employeeId = ins.rows[0].id;
+        created++;
+      }
+
+      await pool.query(
+        `INSERT INTO payroll_lines
+           (user_id, period_id, employee_id, hours_normal, hours_overtime, hourly_rate, gross, net,
+            supplement, pension, holiday_pay, in_payroll, reported, reported_amount, bank_paid, bank_paid_at, on_project)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         ON CONFLICT (period_id, employee_id) DO UPDATE SET
+           hours_normal=EXCLUDED.hours_normal, hours_overtime=EXCLUDED.hours_overtime,
+           hourly_rate=EXCLUDED.hourly_rate, gross=EXCLUDED.gross, net=EXCLUDED.net,
+           supplement=EXCLUDED.supplement, pension=EXCLUDED.pension, holiday_pay=EXCLUDED.holiday_pay,
+           in_payroll=EXCLUDED.in_payroll, reported=EXCLUDED.reported,
+           reported_amount=EXCLUDED.reported_amount, bank_paid=EXCLUDED.bank_paid,
+           bank_paid_at=EXCLUDED.bank_paid_at, on_project=EXCLUDED.on_project`,
+        [req.user.id, period.id, employeeId, row.hours_normal || 0, row.hours_overtime || 0,
+         row.hourly_rate, row.gross, row.net, row.supplement || 0, row.pension || 0, row.holiday_pay || 0,
+         row.in_payroll, row.reported, row.reported_amount, row.bank_paid, row.bank_paid_at, row.on_project]
+      );
+    }
+
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, period.supplier_id, 'payroll_import',
+       `${rows.length} lønlinjer indlæst for perioden ${period.period_start} – ${period.period_end}`]
+    );
+
+    res.json({ ok: true, imported: rows.length, newEmployees: created, warnings: errors });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/payroll/periods/:id/check — kør lønkontrollen
+app.post('/api/payroll/periods/:id/check', requireAuth, async (req, res) => {
+  try {
+    const period = await ownPeriod(req.params.id, req.user.id);
+    if (!period) return res.status(404).json({ error: 'Lønperioden blev ikke fundet.' });
+
+    const lines = await periodLines(period.id);
+    if (!lines.length) return res.status(400).json({ error: 'Der er ingen løndata at kontrollere. Indlæs lønperioden først.' });
+
+    const ruleset = await rulesetFor(period, req.user.id);
+    const result = payroll.runCheck(period, lines, ruleset);
+    const version = result.ruleset.version;
+
+    // Historiske resultater ændres aldrig — de markeres som afløst.
+    await pool.query(
+      'UPDATE payroll_deviations SET superseded=TRUE WHERE period_id=$1 AND superseded=FALSE',
+      [period.id]
+    );
+    for (const d of result.deviations) {
+      await pool.query(
+        `INSERT INTO payroll_deviations
+           (user_id, period_id, line_id, employee_id, code, label, detail, severity, ruleset_version)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [req.user.id, period.id, d.line_id, d.employee_id, d.code, d.label, d.detail, d.severity, version]
+      );
+    }
+    for (const [lineId, status] of result.lineStatus) {
+      const meta = payroll.STATUS_META[status];
+      await pool.query('UPDATE payroll_lines SET status=$1, status_class=$2 WHERE id=$3', [status, meta.cls, lineId]);
+    }
+
+    const meta = payroll.STATUS_META[result.status];
+    await pool.query(
+      `UPDATE payroll_periods SET status=$1, status_class=$2, ruleset_version=$3, checked_at=NOW() WHERE id=$4`,
+      [result.status, meta.cls, version, period.id]
+    );
+
+    const critical = result.deviations.filter(d => d.severity === 'critical').length;
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, period.supplier_id, 'payroll_check',
+       `Lønkontrol kørt med regelversion ${version}: ${meta.label}, ${result.deviations.length} afvigelser (${critical} kritiske)`]
+    );
+
+    res.json({
+      ok: true,
+      status: result.status,
+      statusLabel: meta.label,
+      statusClass: meta.cls,
+      rulesetVersion: version,
+      employees: lines.length,
+      deviations: result.deviations.length,
+      critical,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/payroll/deviations/:id — markér en afvigelse som behandlet
+app.patch('/api/payroll/deviations/:id', requireAuth, async (req, res) => {
+  const { resolution } = req.body || {};
+  if (!resolution || !String(resolution).trim()) {
+    return res.status(400).json({ error: 'En begrundelse er påkrævet, før afvigelsen kan lukkes.' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE payroll_deviations
+          SET resolved_at=NOW(), resolved_by=$1, resolution=$2
+        WHERE id=$3 AND user_id=$4 AND superseded=FALSE AND resolved_at IS NULL
+        RETURNING *`,
+      [req.user.name || req.user.email, String(resolution).trim(), req.params.id, req.user.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Afvigelsen blev ikke fundet eller er allerede behandlet.' });
+
+    // Statussen genberegnes ud fra de afvigelser, der stadig er åbne.
+    const dev = result.rows[0];
+    const remaining = await pool.query(
+      `SELECT severity FROM payroll_deviations
+        WHERE period_id=$1 AND superseded=FALSE AND resolved_at IS NULL`,
+      [dev.period_id]
+    );
+    const lines = await periodLines(dev.period_id);
+    const status = payroll.rollup(remaining.rows, lines);
+    const meta = payroll.STATUS_META[status];
+    await pool.query('UPDATE payroll_periods SET status=$1, status_class=$2 WHERE id=$3',
+      [status, meta.cls, dev.period_id]);
+
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'payroll_deviation_resolved', `${dev.code} lukket: ${String(resolution).trim()}`]
+    );
+    res.json({ ok: true, status, statusLabel: meta.label, statusClass: meta.cls });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/payroll/periods/:id — fjern lønperiode med linjer og afvigelser
+app.delete('/api/payroll/periods/:id', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM payroll_periods WHERE id=$1 AND user_id=$2 RETURNING supplier_id, period_start, period_end',
+      [req.params.id, req.user.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Lønperioden blev ikke fundet.' });
+    const row = result.rows[0];
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, row.supplier_id, 'payroll_period_deleted', `Lønperiode ${row.period_start} – ${row.period_end} slettet`]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/payroll/rulesets — regelbibliotek
+app.get('/api/payroll/rulesets', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM payroll_rulesets WHERE user_id=$1 ORDER BY valid_from DESC, id DESC', [req.user.id]
+    );
+    res.json(result.rows.map(r => ({
+      id: r.id, name: r.name, version: r.version, basis: r.basis, jobGroup: r.job_group,
+      validFrom: r.valid_from, validTo: r.valid_to, minHourly: r.min_hourly,
+      overtimeFactor: r.overtime_factor, pensionPct: r.pension_pct, holidayPct: r.holiday_pct,
+      maxWeeklyHours: r.max_weekly_hours, source: r.source, approvedBy: r.approved_by,
+    })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/payroll/rulesets — nyt regelsæt. Satser rettes aldrig i en
+// eksisterende version; en ændring oprettes som en ny version.
+app.post('/api/payroll/rulesets', requireAuth, async (req, res) => {
+  const { name, version, basis, jobGroup, validFrom, validTo, minHourly,
+          overtimeFactor, pensionPct, holidayPct, maxWeeklyHours, source, approvedBy } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Regelsættet skal have et navn.' });
+  if (!version || !String(version).trim()) return res.status(400).json({ error: 'Regelsættet skal have en version.' });
+  if (!validFrom) return res.status(400).json({ error: 'Ikrafttrædelsesdato er påkrævet.' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO payroll_rulesets
+         (user_id, name, version, basis, job_group, valid_from, valid_to, min_hourly,
+          overtime_factor, pension_pct, holiday_pct, max_weekly_hours, source, approved_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+      [req.user.id, String(name).trim(), String(version).trim(), basis || 'contract', jobGroup || null,
+       validFrom, validTo || null, minHourly || null, overtimeFactor || 1.5, pensionPct || null,
+       holidayPct == null ? 12.5 : holidayPct, maxWeeklyHours || 48, source || null,
+       approvedBy || req.user.name || req.user.email]
+    );
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1,$2,$3)',
+      [req.user.id, 'payroll_ruleset_created', `Regelsæt ${name} ${version} oprettet`]
+    );
+    res.json({ ok: true, id: result.rows[0].id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── CSV Eksport API ─────────────────────────────────────────
 
 function sendCSV(res, filename, rows) {
@@ -1470,6 +1925,61 @@ app.get('/api/export/csv/apprentices', requireAuth, async (req, res) => {
       a.status || '—',
     ]));
     sendCSV(res, `chainguard-laerlinge-${dateStamp()}.csv`, rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/export/csv/payroll — kontrolrapport for én lønperiode
+app.get('/api/export/csv/payroll', requireAuth, async (req, res) => {
+  const view = resolveView(req);
+  try {
+    const period = await ownPeriod(req.query.periodId, req.user.id);
+    if (!period) return res.status(404).json({ error: 'Lønperioden blev ikke fundet.' });
+
+    const lines = await periodLines(period.id);
+    const devs = await pool.query(
+      `SELECT line_id, code, severity FROM payroll_deviations
+        WHERE period_id=$1 AND superseded=FALSE AND resolved_at IS NULL`,
+      [period.id]
+    );
+    const byLine = new Map();
+    for (const d of devs.rows) {
+      if (!byLine.has(d.line_id)) byLine.set(d.line_id, []);
+      byLine.get(d.line_id).push(d.code);
+    }
+
+    const money = v => (v == null ? '—' : Number(v).toFixed(2).replace('.', ','));
+    const head = ['Medarbejder', 'Faggruppe', 'Timer normal', 'Timer overtid'];
+    if (view !== 'main') head.push('Bruttoløn', 'Nettoløn');
+    head.push('Indberettet', 'Udbetalt', 'Status', 'Afvigelser');
+
+    const rows = [head];
+    for (const l of lines) {
+      const masked = payroll.maskLine(l, view);
+      const meta = payroll.STATUS_META[l.status] || payroll.STATUS_META.grey;
+      const row = [l.pseudonym, l.job_group || '—', money(l.hours_normal), money(l.hours_overtime)];
+      if (view !== 'main') row.push(money(masked.gross), money(masked.net));
+      row.push(
+        l.reported ? 'Ja' : 'Nej',
+        view === 'main'
+          ? (masked.net_paid ? 'Ja' : 'Nej')
+          : money(masked.bank_paid),
+        meta.label,
+        (byLine.get(l.id) || []).join(' · ') || 'Ingen'
+      );
+      rows.push(row);
+    }
+
+    const d = v => (v ? new Date(v).toLocaleDateString('da-DK') : '—');
+    rows.push([]);
+    rows.push(['Lønperiode', `${d(period.period_start)} – ${d(period.period_end)}`]);
+    rows.push(['Leverandør', period.supplier_name || '—']);
+    rows.push(['Regelversion', period.ruleset_version || '—']);
+    rows.push(['Kontrolleret', period.checked_at ? new Date(period.checked_at).toLocaleString('da-DK') : 'Ikke kontrolleret']);
+    rows.push(['Visning', view === 'main' ? 'Hovedvirksomhed (beløb udeladt)' : 'Fulde løndata']);
+
+    sendCSV(res, `chainguard-loenkontrol-${dateStamp()}.csv`, rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
