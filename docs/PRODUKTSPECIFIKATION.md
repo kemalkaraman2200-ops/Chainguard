@@ -228,6 +228,33 @@ Bankforbindelsen skal etableres gennem:
 Kontoadgang efter PSD2 kræver bankens eget samtykkeforløb. Et MitID-underskrevet mandat kan derfor
 ikke alene aktivere bankadgangen. Kontoinformation er en reguleret betalingstjeneste.
 
+### NemKonto
+
+Virksomhedens NemKonto er den konto, det offentlige udbetaler til, og den er derfor et naturligt
+omdrejningspunkt for kontrollen. **NemKontoregisteret kan dog ikke slås op af private virksomheder** —
+opslag er forbeholdt offentlige myndigheder, der skal udbetale penge. ChainGuard henter altså ikke
+kontoen automatisk.
+
+I stedet oplyser leverandøren sin NemKonto, og systemet verificerer den mod de kilder, det allerede
+har adgang til:
+
+- Bankforbindelsens kontoejer
+- Fakturakontoen på leverandørens fakturaer
+- Den konto, lønnen faktisk er udbetalt fra
+- Medarbejdernes lønkonti — samme konto begge steder er et alarmsignal
+
+En konto, leverandøren selv har oplyst, må aldrig stå som verificeret. Den skal bekræftes mod en
+bankkilde: kontooplysningstjeneste, kontoudtog eller skriftlig bekræftelse fra banken.
+
+Kontrollen skal give udslag ved:
+
+- Ingen NemKonto oplyst
+- Kontoejeren er ikke virksomheden
+- Fakturakontoen matcher ikke NemKontoen
+- Kontoen er ændret midt i projektperioden
+- NemKontoen bruges også som lønkonto for en medarbejder
+- Lønnen udbetales fra en anden konto end den verificerede
+
 ### Den bedste datamodel
 
 ChainGuard bør gemme:
@@ -629,8 +656,8 @@ når funktionalitet lander.
 | Virksomheds-/leverandørstyring | Delvist | `suppliers`-tabel, `/api/suppliers` (CRUD) |
 | Projekter og leverandørkæde | Delvist | `cases`, `case_subcontractors`, `/api/cases/:id/chain` |
 | Dokumentupload | Delvist | `documents`, `POST /api/documents/upload` (ingen hash/versionering) |
-| Løn- og medarbejderkontrol | Mangler | Kun `apprentices` (lærlinge, sync-model) |
-| Bankkontrol | Mangler | — |
+| Løn- og medarbejderkontrol | Ja | `payroll_*`-tabeller, `payroll.js` og Lønkontrol-siden |
+| Bankkontrol | Delvist | `supplier_accounts` + NemKonto-kontrol (`nemkonto.js`); open banking mangler |
 | Skat/eIndkomst | Mangler | — |
 | RUT-kontrol | Mangler | — |
 | Forsikringskontrol | Mangler | — |

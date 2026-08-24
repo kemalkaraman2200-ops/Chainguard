@@ -301,6 +301,30 @@ async function init() {
     )
   `);
 
+  // Virksomhedens udbetalingskonto (NemKonto) med historik, så en ændring
+  // midt i et projekt kan opdages. Kontonummeret gemmes aldrig — kun
+  // registreringsnummer, sidste fire cifre og et hash til sammenligning.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_accounts (
+      id              SERIAL PRIMARY KEY,
+      user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      supplier_id     INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,
+      kind            VARCHAR(20)  DEFAULT 'nemkonto',
+      reg_no          VARCHAR(4),
+      account_last4   VARCHAR(4),
+      account_hash    VARCHAR(64),
+      holder_name     VARCHAR(255),
+      verified        BOOLEAN      DEFAULT FALSE,
+      verified_source VARCHAR(50),
+      verified_at     TIMESTAMPTZ,
+      valid_from      DATE         DEFAULT CURRENT_DATE,
+      valid_to        DATE,
+      active          BOOLEAN      DEFAULT TRUE,
+      note            TEXT,
+      created_at      TIMESTAMPTZ  DEFAULT NOW()
+    )
+  `);
+
   // Opgrader eksisterende tabeller med nye kolonner (fejler stille hvis kolonnen allerede findes)
   const alters = [
     // users
@@ -326,6 +350,8 @@ async function init() {
     `ALTER TABLE documents ADD COLUMN IF NOT EXISTS expiry     DATE`,
     `ALTER TABLE documents ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(255)`,
     // apprentices — tabellen kan være oprettet i tidligere version uden sync-kolonner
+    `ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS paid_from_hash  VARCHAR(64)`,
+    `ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS paid_from_last4 VARCHAR(4)`,
     `ALTER TABLE apprentices ADD COLUMN IF NOT EXISTS client_id VARCHAR(50)`,
     `ALTER TABLE apprentices ADD COLUMN IF NOT EXISTS data      JSONB`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_apprentices_client ON apprentices(user_id, client_id)`,
@@ -353,6 +379,7 @@ async function init() {
     `CREATE INDEX IF NOT EXISTS idx_pay_lines_period ON payroll_lines(period_id)`,
     `CREATE INDEX IF NOT EXISTS idx_pay_devs_period  ON payroll_deviations(period_id, superseded)`,
     `CREATE INDEX IF NOT EXISTS idx_pay_rules_user   ON payroll_rulesets(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_sup_accounts     ON supplier_accounts(supplier_id, active)`,
   ];
 
   // user_id-indeks på documents kun hvis kolonnen nu eksisterer

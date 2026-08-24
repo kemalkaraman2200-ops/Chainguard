@@ -12,6 +12,7 @@ const Stripe = require('stripe');
 const multer = require('multer');
 const { pool, init, formatSupplier, calcRisk } = require('./db');
 const payroll = require('./payroll');
+const nemkonto = require('./nemkonto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1253,6 +1254,16 @@ const COMPLIANCE_REQS = [
     } },
   { id: 'risk_class', label: 'Risikoklassificering foretaget', category: 'Risiko',
     check: (s) => (s.risk ? 'ok' : 'fail') },
+  { id: 'nemkonto', label: 'NemKonto verificeret', category: 'Bank',
+    check: (s, docs, ctx) => nemkonto.toRequirementResult((ctx && ctx.nemkonto && ctx.nemkonto.status) || 'grey') },
+  { id: 'payroll_check', label: 'Lønkontrol uden kritiske afvigelser', category: 'Løn',
+    check: (s, docs, ctx) => {
+      const p = ctx && ctx.payroll;
+      if (!p) return 'warn';                       // ingen lønperiode indlæst endnu
+      if (p.status === 'red') return 'fail';
+      if (p.status === 'green') return 'ok';
+      return 'warn';
+    } },
   { id: 'sanction', label: 'Sanktions- og PEP-screening', category: 'Screening',
     check: (s) => {
       if (s.status === 'Blokeret') return 'fail';
@@ -1261,7 +1272,112 @@ const COMPLIANCE_REQS = [
     } },
 ];
 
-async function runComplianceForUser(userId) {
+// Samler NemKonto- og lønstatus pr. leverandør, så compliance-tjekket kan
+// bedømme betalings- og lønforholdene sammen med den øvrige dokumentation.
+async function complianceContext(userId) {
+  const accounts = await pool.query(
+    `SELECT * FROM supplier_accounts WHERE user_id=$1 ORDER BY supplier_id, valid_from DESC, id DESC`,
+    [userId]
+  );
+  const employees = await pool.query(
+    'SELECT supplier_id, pseudonym, bank_hash FROM payroll_employees WHERE user_id=$1', [userId]
+  );
+  // Seneste lønperiode pr. leverandør med totaler og antal afvigelser
+  const periods = await pool.query(
+    `SELECT DISTINCT ON (p.supplier_id)
+            p.id, p.supplier_id, p.period_start, p.period_end, p.status, p.status_class,
+            p.checked_at, p.ruleset_version,
+            (SELECT COUNT(*) FROM payroll_lines l WHERE l.period_id = p.id) AS employees,
+            (SELECT COALESCE(SUM(l.net), 0) FROM payroll_lines l WHERE l.period_id = p.id) AS total_net,
+            (SELECT COALESCE(SUM(l.bank_paid), 0) FROM payroll_lines l WHERE l.period_id = p.id) AS total_paid,
+            (SELECT COUNT(*) FROM payroll_deviations d
+              WHERE d.period_id = p.id AND d.superseded = FALSE AND d.resolved_at IS NULL) AS open_deviations,
+            (SELECT COUNT(*) FROM payroll_deviations d
+              WHERE d.period_id = p.id AND d.superseded = FALSE AND d.resolved_at IS NULL
+                AND d.severity = 'critical') AS critical_deviations
+       FROM payroll_periods p
+      WHERE p.user_id=$1
+      ORDER BY p.supplier_id, p.period_start DESC, p.id DESC`,
+    [userId]
+  );
+  const payouts = await pool.query(
+    `SELECT p.supplier_id, l.paid_from_hash, l.paid_from_last4
+       FROM payroll_lines l JOIN payroll_periods p ON p.id = l.period_id
+      WHERE l.user_id=$1 AND l.paid_from_hash IS NOT NULL`,
+    [userId]
+  );
+
+  const by = (rows, key) => rows.reduce((m, r) => {
+    (m[r[key]] = m[r[key]] || []).push(r); return m;
+  }, {});
+
+  return {
+    accounts: by(accounts.rows, 'supplier_id'),
+    employees: by(employees.rows, 'supplier_id'),
+    payouts: by(payouts.rows, 'supplier_id'),
+    periods: periods.rows.reduce((m, r) => { m[r.supplier_id] = r; return m; }, {}),
+  };
+}
+
+// Kører NemKonto-kontrollen for én leverandør
+function nemkontoFor(supplier, ctx) {
+  const all = ctx.accounts[supplier.id] || [];
+  const active = all.filter(a => a.kind === 'nemkonto' && a.active);
+  const account = active[0] || null;
+  const invoiceAccount = all.find(a => a.kind === 'invoice' && a.active) || null;
+
+  const check = nemkonto.runCheck({
+    account,
+    history: all.filter(a => a.kind === 'nemkonto'),
+    supplierName: supplier.name,
+    invoiceAccount,
+    employees: ctx.employees[supplier.id] || [],
+    payouts: ctx.payouts[supplier.id] || [],
+  });
+
+  const meta = nemkonto.STATUS_META[check.status];
+  return {
+    regNo: account ? account.reg_no : null,
+    last4: account ? account.account_last4 : null,
+    holderName: account ? account.holder_name : null,
+    verified: account ? account.verified : false,
+    verifiedSource: account ? account.verified_source : null,
+    verifiedAt: account ? account.verified_at : null,
+    validFrom: account ? account.valid_from : null,
+    changes: all.filter(a => a.kind === 'nemkonto').length,
+    status: check.status,
+    statusLabel: meta.label,
+    statusClass: meta.cls,
+    deviations: check.deviations,
+  };
+}
+
+// Lønstatus for compliance-siden. Beløb maskeres for hovedvirksomheden.
+function payrollFor(supplier, ctx, view) {
+  const p = ctx.periods[supplier.id];
+  if (!p) return null;
+  const meta = payroll.STATUS_META[p.status] || payroll.STATUS_META.grey;
+  const masked = view === 'main';
+  return {
+    periodId: p.id,
+    periodStart: p.period_start,
+    periodEnd: p.period_end,
+    status: p.status,
+    statusLabel: meta.label,
+    statusClass: meta.cls,
+    checkedAt: p.checked_at,
+    rulesetVersion: p.ruleset_version,
+    employees: Number(p.employees),
+    openDeviations: Number(p.open_deviations),
+    criticalDeviations: Number(p.critical_deviations),
+    totalNet: masked ? null : Number(p.total_net),
+    totalPaid: masked ? null : Number(p.total_paid),
+    allPaid: Number(p.total_paid) > 0 && Math.abs(Number(p.total_net) - Number(p.total_paid)) <= 1,
+    masked,
+  };
+}
+
+async function runComplianceForUser(userId, view) {
   const supRes = await pool.query('SELECT * FROM suppliers WHERE user_id=$1 ORDER BY name', [userId]);
   const docRes = await pool.query('SELECT name, type, status, supplier_name FROM documents WHERE user_id=$1', [userId]);
 
@@ -1271,19 +1387,26 @@ async function runComplianceForUser(userId) {
     (docsBySupplier[key] = docsBySupplier[key] || []).push(d);
   });
 
+  const ctx = await complianceContext(userId);
   const results = {};
+  const details = {};
+
   supRes.rows.forEach(s => {
     const docs = docsBySupplier[s.name] || [];
+    const supplierCtx = { nemkonto: nemkontoFor(s, ctx), payroll: payrollFor(s, ctx, view) };
+    details[s.id] = supplierCtx;
     results[s.id] = {};
-    COMPLIANCE_REQS.forEach(r => { results[s.id][r.id] = r.check(s, docs); });
+    COMPLIANCE_REQS.forEach(r => { results[s.id][r.id] = r.check(s, docs, supplierCtx); });
   });
-  return { suppliers: supRes.rows, results };
+
+  return { suppliers: supRes.rows, results, details };
 }
 
 // POST /api/compliance/check — kør fuldt tjek, gem resultater, returnér per leverandør
 app.post('/api/compliance/check', requireAuth, async (req, res) => {
   try {
-    const { suppliers, results } = await runComplianceForUser(req.user.id);
+    const view = resolveView(req);
+    const { suppliers, results, details } = await runComplianceForUser(req.user.id, view);
 
     // Erstat tidligere resultater med det nye kørselsresultat
     await pool.query('DELETE FROM compliance_results WHERE user_id=$1', [req.user.id]);
@@ -1304,9 +1427,11 @@ app.post('/api/compliance/check', requireAuth, async (req, res) => {
 
     res.json({
       lastRun: new Date().toISOString(),
+      view,
       requirements: COMPLIANCE_REQS.map(r => ({ id: r.id, label: r.label, category: r.category })),
       suppliers: suppliers.map(s => ({ id: s.id, name: s.name, country: s.country, risk: s.risk })),
       results,
+      details,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1315,6 +1440,7 @@ app.post('/api/compliance/check', requireAuth, async (req, res) => {
 
 // GET /api/compliance/results — seneste gemte kørsel
 app.get('/api/compliance/results', requireAuth, async (req, res) => {
+  const view = resolveView(req);
   try {
     const rows = await pool.query(
       `SELECT cr.supplier_id, cr.req_id, cr.result, cr.checked_at, s.name, s.country, s.risk
@@ -1322,7 +1448,7 @@ app.get('/api/compliance/results', requireAuth, async (req, res) => {
        WHERE cr.user_id=$1`,
       [req.user.id]
     );
-    if (!rows.rows.length) return res.json({ lastRun: null, requirements: COMPLIANCE_REQS.map(r => ({ id: r.id, label: r.label, category: r.category })), suppliers: [], results: {} });
+    if (!rows.rows.length) return res.json({ lastRun: null, view, requirements: COMPLIANCE_REQS.map(r => ({ id: r.id, label: r.label, category: r.category })), suppliers: [], results: {}, details: {} });
 
     const results = {};
     const suppliersById = {};
@@ -1332,11 +1458,22 @@ app.get('/api/compliance/results', requireAuth, async (req, res) => {
       suppliersById[r.supplier_id] = { id: r.supplier_id, name: r.name, country: r.country, risk: r.risk };
       if (!lastRun || new Date(r.checked_at) > new Date(lastRun)) lastRun = r.checked_at;
     });
+    // NemKonto- og lønstatus beregnes ved opslag, så siden viser den aktuelle
+    // tilstand og ikke et fastfrosset øjebliksbillede fra sidste kørsel.
+    const live = await runComplianceForUser(req.user.id, view);
+    Object.keys(results).forEach(id => {
+      if (!live.results[id]) return;
+      results[id].nemkonto = live.results[id].nemkonto;
+      results[id].payroll_check = live.results[id].payroll_check;
+    });
+
     res.json({
       lastRun,
+      view,
       requirements: COMPLIANCE_REQS.map(r => ({ id: r.id, label: r.label, category: r.category })),
       suppliers: Object.values(suppliersById),
       results,
+      details: live.details,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1670,18 +1807,21 @@ app.post('/api/payroll/periods/:id/import', requireAuth, async (req, res) => {
       await pool.query(
         `INSERT INTO payroll_lines
            (user_id, period_id, employee_id, hours_normal, hours_overtime, hourly_rate, gross, net,
-            supplement, pension, holiday_pay, in_payroll, reported, reported_amount, bank_paid, bank_paid_at, on_project)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+            supplement, pension, holiday_pay, in_payroll, reported, reported_amount, bank_paid, bank_paid_at,
+            on_project, paid_from_hash, paid_from_last4)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
          ON CONFLICT (period_id, employee_id) DO UPDATE SET
            hours_normal=EXCLUDED.hours_normal, hours_overtime=EXCLUDED.hours_overtime,
            hourly_rate=EXCLUDED.hourly_rate, gross=EXCLUDED.gross, net=EXCLUDED.net,
            supplement=EXCLUDED.supplement, pension=EXCLUDED.pension, holiday_pay=EXCLUDED.holiday_pay,
            in_payroll=EXCLUDED.in_payroll, reported=EXCLUDED.reported,
            reported_amount=EXCLUDED.reported_amount, bank_paid=EXCLUDED.bank_paid,
-           bank_paid_at=EXCLUDED.bank_paid_at, on_project=EXCLUDED.on_project`,
+           bank_paid_at=EXCLUDED.bank_paid_at, on_project=EXCLUDED.on_project,
+           paid_from_hash=EXCLUDED.paid_from_hash, paid_from_last4=EXCLUDED.paid_from_last4`,
         [req.user.id, period.id, employeeId, row.hours_normal || 0, row.hours_overtime || 0,
          row.hourly_rate, row.gross, row.net, row.supplement || 0, row.pension || 0, row.holiday_pay || 0,
-         row.in_payroll, row.reported, row.reported_amount, row.bank_paid, row.bank_paid_at, row.on_project]
+         row.in_payroll, row.reported, row.reported_amount, row.bank_paid, row.bank_paid_at, row.on_project,
+         row.paid_from_hash || null, row.paid_from_last4 || null]
       );
     }
 
@@ -1855,6 +1995,124 @@ app.post('/api/payroll/rulesets', requireAuth, async (req, res) => {
       [req.user.id, 'payroll_ruleset_created', `Regelsæt ${name} ${version} oprettet`]
     );
     res.json({ ok: true, id: result.rows[0].id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── NemKonto API ────────────────────────────────────────────
+// NemKontoregisteret er ikke tilgængeligt for private virksomheder, så
+// kontoen oplyses af leverandøren og verificeres mod bankforbindelsen.
+
+async function ownSupplier(supplierId, userId) {
+  const r = await pool.query('SELECT * FROM suppliers WHERE id=$1 AND user_id=$2', [supplierId, userId]);
+  return r.rows[0] || null;
+}
+
+// GET /api/suppliers/:id/nemkonto — konto, historik og kontrolresultat
+app.get('/api/suppliers/:id/nemkonto', requireAuth, async (req, res) => {
+  const view = resolveView(req);
+  try {
+    const supplier = await ownSupplier(req.params.id, req.user.id);
+    if (!supplier) return res.status(404).json({ error: 'Leverandøren blev ikke fundet.' });
+
+    const ctx = await complianceContext(req.user.id);
+    const history = (ctx.accounts[supplier.id] || []).filter(a => a.kind === 'nemkonto');
+
+    res.json({
+      supplier: { id: supplier.id, name: supplier.name, cvr: supplier.cvr },
+      nemkonto: nemkontoFor(supplier, ctx),
+      payroll: payrollFor(supplier, ctx, view),
+      history: history.map(h => ({
+        id: h.id, regNo: h.reg_no, last4: h.account_last4, holderName: h.holder_name,
+        verified: h.verified, verifiedSource: h.verified_source, verifiedAt: h.verified_at,
+        validFrom: h.valid_from, validTo: h.valid_to, active: h.active, note: h.note,
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/suppliers/:id/nemkonto — registrér konto. En ny konto lukker den
+// forrige i stedet for at overskrive den, så en ændring kan ses i historikken.
+app.post('/api/suppliers/:id/nemkonto', requireAuth, async (req, res) => {
+  const { regNo, accountNo, holderName, kind, note } = req.body || {};
+  const type = kind === 'invoice' ? 'invoice' : 'nemkonto';
+
+  const parsed = nemkonto.parseAccount(regNo, accountNo);
+  if (!parsed.valid) return res.status(400).json({ error: parsed.error });
+
+  try {
+    const supplier = await ownSupplier(req.params.id, req.user.id);
+    if (!supplier) return res.status(404).json({ error: 'Leverandøren blev ikke fundet.' });
+
+    const current = await pool.query(
+      'SELECT id, account_hash FROM supplier_accounts WHERE supplier_id=$1 AND kind=$2 AND active=TRUE',
+      [supplier.id, type]
+    );
+    if (current.rows[0] && current.rows[0].account_hash === parsed.account_hash) {
+      return res.status(400).json({ error: 'Kontoen er allerede registreret.' });
+    }
+    await pool.query(
+      'UPDATE supplier_accounts SET active=FALSE, valid_to=CURRENT_DATE WHERE supplier_id=$1 AND kind=$2 AND active=TRUE',
+      [supplier.id, type]
+    );
+
+    const result = await pool.query(
+      `INSERT INTO supplier_accounts
+         (user_id, supplier_id, kind, reg_no, account_last4, account_hash, holder_name, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [req.user.id, supplier.id, type, parsed.reg_no, parsed.account_last4, parsed.account_hash,
+       holderName || null, note || null]
+    );
+
+    const label = type === 'invoice' ? 'Fakturakonto' : 'NemKonto';
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, supplier.id, 'nemkonto_registered',
+       `${label} ${parsed.reg_no} ••••${parsed.account_last4} registreret${current.rows[0] ? ' (afløser tidligere konto)' : ''}`]
+    );
+
+    const ctx = await complianceContext(req.user.id);
+    res.json({ ok: true, id: result.rows[0].id, replaced: !!current.rows[0], nemkonto: nemkontoFor(supplier, ctx) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/suppliers/:id/nemkonto/verify — bekræft kontoen mod en bankkilde
+app.post('/api/suppliers/:id/nemkonto/verify', requireAuth, async (req, res) => {
+  const { source, holderName } = req.body || {};
+  const allowed = ['psd2', 'bank_statement', 'bank_confirmation'];
+  if (!allowed.includes(source)) {
+    return res.status(400).json({ error: 'Angiv en gyldig bankkilde: kontooplysningstjeneste, kontoudtog eller bankbekræftelse.' });
+  }
+  if (!holderName || !String(holderName).trim()) {
+    return res.status(400).json({ error: 'Kontoejerens navn ifølge banken er påkrævet.' });
+  }
+  try {
+    const supplier = await ownSupplier(req.params.id, req.user.id);
+    if (!supplier) return res.status(404).json({ error: 'Leverandøren blev ikke fundet.' });
+
+    const result = await pool.query(
+      `UPDATE supplier_accounts
+          SET verified=TRUE, verified_source=$1, verified_at=NOW(), holder_name=$2
+        WHERE supplier_id=$3 AND kind='nemkonto' AND active=TRUE
+        RETURNING reg_no, account_last4`,
+      [source, String(holderName).trim(), supplier.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Der er ingen aktiv NemKonto at verificere.' });
+
+    const row = result.rows[0];
+    await pool.query(
+      'INSERT INTO audit_log (user_id, supplier_id, action, details) VALUES ($1,$2,$3,$4)',
+      [req.user.id, supplier.id, 'nemkonto_verified',
+       `NemKonto ${row.reg_no} ••••${row.account_last4} verificeret mod ${source}, kontoejer "${String(holderName).trim()}"`]
+    );
+
+    const ctx = await complianceContext(req.user.id);
+    res.json({ ok: true, nemkonto: nemkontoFor(supplier, ctx) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -297,6 +297,7 @@ const CSV_FIELDS = {
   bank_betalt: 'bank_paid', udbetalt: 'bank_paid',
   bank_dato: 'bank_paid_at', udbetalingsdato: 'bank_paid_at',
   paa_projekt: 'on_project', på_projekt: 'on_project',
+  betalt_fra: 'paid_from_account', afsenderkonto: 'paid_from_account',
   i_loensystem: 'in_payroll', i_lønsystem: 'in_payroll',
 };
 
@@ -362,6 +363,11 @@ function parseCSV(text) {
       row.bank_hash = bankHash(row.bank_account);
       row.bank_last4 = bankLast4(row.bank_account);
       delete row.bank_account; // hele kontonummeret forlader aldrig importen
+    }
+    if (row.paid_from_account) {
+      row.paid_from_hash = bankHash(row.paid_from_account);
+      row.paid_from_last4 = bankLast4(row.paid_from_account);
+      delete row.paid_from_account;
     }
     rows.push(row);
   }

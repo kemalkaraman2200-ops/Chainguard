@@ -1710,8 +1710,15 @@ Aarhus Havnefront</div>
       </div>
 
       <!-- Leverandørvælger -->
-      <div class="filter-row" id="cc-supplier-filter" style="margin-bottom:16px;flex-wrap:wrap">
+      <div class="filter-row" id="cc-supplier-filter" style="margin-bottom:10px;flex-wrap:wrap">
         <button class="filter-btn active" data-cc-supplier="all" onclick="setCCSupplier('all',this)">Alle leverandører</button>
+      </div>
+
+      <!-- Visning: hvem ser hvad -->
+      <div class="filter-row" id="cc-view-filter" style="margin-bottom:16px;flex-wrap:wrap">
+        <button class="filter-btn active" onclick="setCCView('supplier',this)">Leverandør</button>
+        <button class="filter-btn" onclick="setCCView('main',this)">Hovedvirksomhed</button>
+        <button class="filter-btn" onclick="setCCView('controller',this)">Kontrollør</button>
       </div>
 
       <!-- Krav pr. leverandør -->
@@ -1728,6 +1735,32 @@ Aarhus Havnefront</div>
               <tbody id="cc-requirements-tbody"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <!-- NemKonto og lønninger -->
+      <div class="card" style="margin-top:16px" id="cc-accounts-card">
+        <div class="card-head" onclick="toggleCard(this)">
+          <div class="card-title">NemKonto og lønninger</div>
+          <div class="card-toggle"><svg class="card-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+          <div class="card-action" id="cc-acc-view">Leverandørvisning</div>
+        </div>
+        <div class="card-body">
+          <div style="padding:14px 22px 0;font-size:11.5px;color:var(--text-50);line-height:1.65">
+            NemKontoregisteret kan ikke slås op af private virksomheder — opslag er forbeholdt offentlige
+            myndigheder, der skal udbetale penge. Kontoen oplyses derfor af leverandøren og verificeres mod
+            bankforbindelsen, fakturakontoen og den konto, lønnen faktisk udbetales fra.
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Leverandør</th><th>NemKonto</th><th>Verificeret</th>
+                <th>Seneste lønperiode</th><th>Udbetalt løn</th><th>Status</th><th></th>
+              </tr></thead>
+              <tbody id="cc-accounts-tbody"></tbody>
+            </table>
+          </div>
+          <div id="cc-account-findings" style="padding:4px 22px 18px"></div>
         </div>
       </div>
 
@@ -6203,41 +6236,89 @@ var COMPLIANCE_REQUIREMENTS = [
       return 'warn';
     }
   },
+  {
+    id: 'nemkonto', label: 'NemKonto verificeret', category: 'Bank',
+    check: function(s) {
+      var d = _ccDetails[s.id];
+      if (!d || !d.nemkonto) return 'warn';
+      return ({ green:'ok', amber:'warn', red:'fail', grey:'fail' })[d.nemkonto.status] || 'fail';
+    }
+  },
+  {
+    id: 'payroll_check', label: 'Lønkontrol uden kritiske afvigelser', category: 'Løn',
+    check: function(s) {
+      var d = _ccDetails[s.id];
+      if (!d || !d.payroll) return 'warn';
+      if (d.payroll.status === 'red') return 'fail';
+      if (d.payroll.status === 'green') return 'ok';
+      return 'warn';
+    }
+  },
 ];
 
 var _ccActiveSupplier = 'all';
 var _ccLastRun = null;
 var _ccResults = {}; // supplierId -> { reqId -> 'ok'|'warn'|'fail' }
+var _ccDetails = {}; // supplierId -> { nemkonto, payroll }
+var _ccSuppliers = null;    // leverandører fra serveren, når de findes
+var _ccRequirements = null; // kravliste fra serveren, når den findes
+var _ccView = 'supplier';   // supplier | main | controller
+
+// Serveren er kilden, når den svarer. Ellers kører siden videre på appens
+// egne regler over demodata.
+function ccSuppliers()  { return _ccSuppliers || SUPPLIERS; }
+function ccReqs()       { return _ccRequirements || COMPLIANCE_REQUIREMENTS; }
 
 function runComplianceCheck() {
   var btn = document.getElementById('cc-run-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Kører…'; }
 
-  // Simulér kort delay
-  setTimeout(function() {
-    _ccResults = {};
-    SUPPLIERS.forEach(function(s) {
-      _ccResults[s.id] = {};
-      COMPLIANCE_REQUIREMENTS.forEach(function(r) {
-        _ccResults[s.id][r.id] = r.check(s);
-      });
-    });
+  var done = function() {
     _ccLastRun = new Date();
-
     var el = document.getElementById('cc-last-run');
     if (el) el.textContent = 'Sidst kørt: ' + _ccLastRun.toLocaleTimeString('da-DK', {hour:'2-digit',minute:'2-digit'});
-
-    // Persistér kørslen i backend (compliance_results) hvis API'et er tilgængeligt
-    fetch('/api/compliance/check', { method: 'POST', signal: AbortSignal.timeout(4000) }).catch(function(){});
-
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="white"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zM0 8a8 8 0 1116 0A8 8 0 010 8z"/><path d="M10.5 8L6.5 5.5v5L10.5 8z" fill="white"/></svg> Kør fuld gennemgang';
     }
-
+    _buildCCSupplierFilter();
     renderComplianceCheck();
-    showToast('Gennemgang fuldført', SUPPLIERS.length + ' leverandører kontrolleret mod ' + COMPLIANCE_REQUIREMENTS.length + ' krav', 'green');
-  }, 800);
+    showToast('Gennemgang fuldført',
+      ccSuppliers().length + ' leverandører kontrolleret mod ' + ccReqs().length + ' krav', 'green');
+  };
+
+  fetch('/api/compliance/check?view=' + _ccView, { method: 'POST', signal: AbortSignal.timeout(6000) })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .catch(function() { return null; })
+    .then(function(data) {
+      if (data && data.suppliers && data.suppliers.length) {
+        _ccSuppliers = data.suppliers.map(function(s) {
+          return { id: s.id, name: s.name, country: s.country || 'Danmark',
+                   risk: s.risk, type: s.type || '—' };
+        });
+        _ccRequirements = data.requirements;
+        _ccResults = data.results || {};
+        _ccDetails = data.details || {};
+      } else {
+        // Ingen leverandører i databasen — kør appens egne regler over demodata
+        _ccSuppliers = null; _ccRequirements = null; _ccDetails = {};
+        _ccResults = {};
+        SUPPLIERS.forEach(function(s) {
+          _ccResults[s.id] = {};
+          COMPLIANCE_REQUIREMENTS.forEach(function(r) { _ccResults[s.id][r.id] = r.check(s); });
+        });
+      }
+      done();
+    });
+}
+
+// Skift mellem leverandør-, hovedvirksomheds- og kontrollørvisning. Beløb
+// maskeres serverside, så de aldrig når browseren i hovedvirksomhedsvisning.
+function setCCView(view, el) {
+  _ccView = view;
+  document.querySelectorAll('#cc-view-filter .filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (el) el.classList.add('active');
+  runComplianceCheck();
 }
 
 function setCCSupplier(id, el) {
@@ -6251,16 +6332,17 @@ function renderComplianceCheck() {
   // Kør automatisk hvis aldrig kørt
   if (!_ccLastRun) { runComplianceCheck(); return; }
 
+  var ALL = ccSuppliers(), REQS = ccReqs();
   var suppliers = _ccActiveSupplier === 'all'
-    ? SUPPLIERS
-    : SUPPLIERS.filter(function(s){ return String(s.id) === String(_ccActiveSupplier); });
+    ? ALL
+    : ALL.filter(function(s){ return String(s.id) === String(_ccActiveSupplier); });
 
   // KPI'er
   var okCount = 0, partialCount = 0, criticalCount = 0;
-  SUPPLIERS.forEach(function(s) {
+  ALL.forEach(function(s) {
     var res = _ccResults[s.id] || {};
-    var hasFail = COMPLIANCE_REQUIREMENTS.some(function(r){ return res[r.id] === 'fail'; });
-    var hasWarn = COMPLIANCE_REQUIREMENTS.some(function(r){ return res[r.id] === 'warn'; });
+    var hasFail = REQS.some(function(r){ return res[r.id] === 'fail'; });
+    var hasWarn = REQS.some(function(r){ return res[r.id] === 'warn'; });
     if (hasFail) criticalCount++;
     else if (hasWarn) partialCount++;
     else okCount++;
@@ -6271,12 +6353,12 @@ function renderComplianceCheck() {
   el = document.getElementById('cc-kpi-critical');  if(el) el.textContent = criticalCount;
 
   var sub = document.getElementById('cc-subtitle');
-  if (sub) sub.textContent = SUPPLIERS.length + ' leverandører · ' + COMPLIANCE_REQUIREMENTS.length + ' krav gennemgået';
+  if (sub) sub.textContent = ALL.length + ' leverandører · ' + REQS.length + ' krav gennemgået';
 
   var cardTitle = document.getElementById('cc-card-title');
   if (cardTitle) cardTitle.textContent = _ccActiveSupplier === 'all'
     ? 'Compliance status pr. krav — alle leverandører'
-    : 'Compliance status — ' + (SUPPLIERS.find(function(s){ return String(s.id)===String(_ccActiveSupplier); })||{}).name;
+    : 'Compliance status — ' + (ALL.find(function(s){ return String(s.id)===String(_ccActiveSupplier); })||{}).name;
 
   // Krav-tabel
   var iconOk   = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="var(--green-dim)" stroke="var(--green)" stroke-width="1.5"/><path d="M6 10.5l2.5 2.5 5.5-5.5" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -6285,7 +6367,7 @@ function renderComplianceCheck() {
 
   var tbody = document.getElementById('cc-requirements-tbody');
   if (tbody) {
-    tbody.innerHTML = COMPLIANCE_REQUIREMENTS.map(function(r) {
+    tbody.innerHTML = REQS.map(function(r) {
       var okN = 0, warnN = 0, failN = 0;
       suppliers.forEach(function(s) {
         var v = (_ccResults[s.id]||{})[r.id];
@@ -6310,14 +6392,14 @@ function renderComplianceCheck() {
   if (stbody) {
     stbody.innerHTML = suppliers.map(function(s) {
       var res = _ccResults[s.id] || {};
-      var okN   = COMPLIANCE_REQUIREMENTS.filter(function(r){ return res[r.id]==='ok'; }).length;
-      var failN = COMPLIANCE_REQUIREMENTS.filter(function(r){ return res[r.id]==='fail'; }).length;
-      var warnN = COMPLIANCE_REQUIREMENTS.filter(function(r){ return res[r.id]==='warn'; }).length;
-      var total = COMPLIANCE_REQUIREMENTS.length;
+      var okN   = REQS.filter(function(r){ return res[r.id]==='ok'; }).length;
+      var failN = REQS.filter(function(r){ return res[r.id]==='fail'; }).length;
+      var warnN = REQS.filter(function(r){ return res[r.id]==='warn'; }).length;
+      var total = REQS.length;
       var pct   = Math.round(okN / total * 100);
       var color = pct >= 80 ? 'var(--green)' : pct >= 60 ? 'var(--amber)' : 'var(--red)';
       var statusIcon = failN > 0 ? iconFail : warnN > 0 ? iconWarn : iconOk;
-      var missing = COMPLIANCE_REQUIREMENTS.filter(function(r){ return res[r.id]!=='ok'; })
+      var missing = REQS.filter(function(r){ return res[r.id]!=='ok'; })
         .map(function(r){ return r.label; }).join(', ') || '—';
       return '<tr>'
         + '<td><div class="td-name" style="cursor:pointer" onclick="setCCSupplier(' + s.id + ', null)">' + s.name + '</div><div class="td-meta">' + s.type + ' · ' + s.country + '</div></td>'
@@ -6328,6 +6410,8 @@ function renderComplianceCheck() {
         + '</tr>';
     }).join('');
   }
+
+  renderCCAccounts(suppliers);
 }
 
 // Byg supplier-filter knapper
@@ -6335,9 +6419,239 @@ function _buildCCSupplierFilter() {
   var row = document.getElementById('cc-supplier-filter');
   if (!row) return;
   row.innerHTML = '<button class="filter-btn active" onclick="setCCSupplier(\'all\',this)">Alle leverandører</button>'
-    + SUPPLIERS.map(function(s){
+    + ccSuppliers().map(function(s){
         return '<button class="filter-btn" onclick="setCCSupplier(' + s.id + ',this)">' + s.name.split(' ')[0] + (s.name.split(' ').length>1?' '+s.name.split(' ')[1]:'') + '</button>';
       }).join('');
+}
+
+// ── NemKonto og lønninger på compliance-siden ────────────────
+function _ccKr(v) {
+  if (v == null) return null;
+  return Number(v).toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kr.';
+}
+function _ccDate(d) { return d ? new Date(d).toLocaleDateString('da-DK') : '—'; }
+
+var _CC_SOURCE_LABEL = {
+  psd2: 'Kontooplysningstjeneste',
+  bank_statement: 'Kontoudtog',
+  bank_confirmation: 'Bankbekræftelse',
+};
+
+function renderCCAccounts(suppliers) {
+  var tbody = document.getElementById('cc-accounts-tbody');
+  var viewEl = document.getElementById('cc-acc-view');
+  if (viewEl) {
+    viewEl.textContent = _ccView === 'main' ? 'Hovedvirksomhedens visning'
+                       : _ccView === 'controller' ? 'Kontrollørvisning' : 'Leverandørvisning';
+  }
+  if (!tbody) return;
+
+  if (!suppliers.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-30)">Ingen leverandører at vise.</td></tr>';
+    document.getElementById('cc-account-findings').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = suppliers.map(function(s) {
+    var d = _ccDetails[s.id] || {};
+    var nk = d.nemkonto, pay = d.payroll;
+
+    var konto = nk && nk.last4
+      ? '<span style="font-variant-numeric:tabular-nums">' + nk.regNo + ' ••••' + nk.last4 + '</span>'
+        + (nk.changes > 1 ? '<div class="td-meta">' + nk.changes + ' konti i historikken</div>' : '')
+      : '<span style="color:var(--text-30)">Ikke oplyst</span>';
+
+    var verified = nk && nk.verified
+      ? '<span class="chip chip-green">' + (_CC_SOURCE_LABEL[nk.verifiedSource] || 'Bekræftet') + '</span>'
+        + '<div class="td-meta">' + _ccDate(nk.verifiedAt) + '</div>'
+      : (nk && nk.last4
+          ? '<span class="chip chip-amber">Leverandørens egen oplysning</span>'
+          : '<span style="color:var(--text-30)">—</span>');
+
+    var periode = pay
+      ? _ccDate(pay.periodStart) + ' – ' + _ccDate(pay.periodEnd)
+        + '<div class="td-meta">' + pay.employees + ' medarbejdere · '
+        + (pay.criticalDeviations ? '<span style="color:var(--red);font-weight:700">'
+            + pay.criticalDeviations + ' kritiske</span>' : 'ingen kritiske afvigelser') + '</div>'
+      : '<span style="color:var(--text-30)">Ingen lønperiode indlæst</span>';
+
+    var udbetalt;
+    if (!pay) {
+      udbetalt = '<span style="color:var(--text-30)">—</span>';
+    } else if (pay.masked) {
+      udbetalt = '<span style="color:var(--text-30);letter-spacing:2px">••••••</span>'
+        + '<div class="td-meta">' + (pay.allPaid ? 'Alt udbetalt' : 'Mangler udbetaling') + '</div>';
+    } else {
+      udbetalt = '<span style="font-variant-numeric:tabular-nums;color:var(--text-100);font-weight:600">'
+        + _ccKr(pay.totalPaid) + '</span>'
+        + '<div class="td-meta">af ' + _ccKr(pay.totalNet) + ' netto</div>';
+    }
+
+    var status = nk
+      ? '<span class="status ' + nk.statusClass + '">' + nk.statusLabel + '</span>'
+      : '<span class="status s-gray">Ikke oplyst</span>';
+
+    var actions = nk && nk.last4
+      ? (nk.verified
+          ? '<button class="btn btn-ghost" style="padding:4px 11px;font-size:11.5px" onclick="openNemkontoModal(' + s.id + ',\'register\')">Skift konto</button>'
+          : '<button class="btn btn-ghost" style="padding:4px 11px;font-size:11.5px" onclick="openNemkontoModal(' + s.id + ',\'verify\')">Verificér</button>')
+      : '<button class="btn btn-ghost" style="padding:4px 11px;font-size:11.5px" onclick="openNemkontoModal(' + s.id + ',\'register\')">Registrér</button>';
+
+    return '<tr>'
+      + '<td><div class="td-name">' + s.name + '</div><div class="td-meta">' + (s.country || '') + '</div></td>'
+      + '<td>' + konto + '</td>'
+      + '<td>' + verified + '</td>'
+      + '<td style="font-size:12px">' + periode + '</td>'
+      + '<td>' + udbetalt + '</td>'
+      + '<td>' + status + '</td>'
+      + '<td style="text-align:right">' + actions + '</td>'
+      + '</tr>';
+  }).join('');
+
+  // Afvigelser fra NemKonto-kontrollen, samlet under tabellen
+  var findings = [];
+  suppliers.forEach(function(s) {
+    var nk = (_ccDetails[s.id] || {}).nemkonto;
+    if (nk && nk.deviations) {
+      nk.deviations.forEach(function(dv) { findings.push({ supplier: s.name, dv: dv }); });
+    }
+  });
+  findings.sort(function(a, b) {
+    return (a.dv.severity === 'critical' ? 0 : 1) - (b.dv.severity === 'critical' ? 0 : 1);
+  });
+
+  document.getElementById('cc-account-findings').innerHTML = findings.length
+    ? '<div style="font-size:11px;font-weight:700;letter-spacing:0.9px;text-transform:uppercase;'
+      + 'color:var(--text-30);margin:16px 0 10px">Fund i NemKonto-kontrollen</div>'
+      + findings.map(function(f) {
+          var crit = f.dv.severity === 'critical';
+          return '<div style="display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--border)">'
+            + '<span class="chip ' + (crit ? 'chip-red' : 'chip-amber') + '" style="flex-shrink:0;height:fit-content">'
+            + (crit ? 'Kritisk' : 'Advarsel') + '</span>'
+            + '<div><div style="font-size:12.5px;font-weight:600;color:var(--text-100)">'
+            + f.supplier + ' · ' + f.dv.label + '</div>'
+            + '<div style="font-size:11.5px;color:var(--text-50);margin-top:2px;line-height:1.55">'
+            + f.dv.detail + '</div></div></div>';
+        }).join('')
+    : '<div style="margin-top:14px;font-size:12px;color:var(--text-50)">'
+      + 'Ingen fund i NemKonto-kontrollen for de viste leverandører.</div>';
+}
+
+// ── NemKonto-modal ──────────────────────────────────────────
+var _nkSupplierId = null;
+
+function openNemkontoModal(supplierId, mode) {
+  _nkSupplierId = supplierId;
+  var supplier = ccSuppliers().find(function(s) { return String(s.id) === String(supplierId); }) || {};
+  var nk = (_ccDetails[supplierId] || {}).nemkonto;
+  var verify = mode === 'verify';
+
+  var existing = document.getElementById('nk-modal-overlay');
+  if (existing) existing.remove();
+
+  document.body.insertAdjacentHTML('beforeend',
+    '<div class="simple-modal-overlay open" id="nk-modal-overlay">'
+    + '<div class="simple-modal">'
+    + '<div class="sm-head">'
+    + '<span class="sm-title">' + (verify ? 'Verificér NemKonto' : 'Registrér NemKonto') + '</span>'
+    + '<button class="drawer-close" onclick="closeNemkontoModal()">'
+    + '<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>'
+    + '</button></div>'
+    + '<div class="sm-body">'
+    + '<div style="font-size:12px;color:var(--text-50);line-height:1.6;margin-bottom:4px">'
+    + supplier.name + '</div>'
+    + (verify
+        ? '<div style="font-size:11.5px;color:var(--text-50);line-height:1.6">'
+          + 'Kontoen ' + (nk ? nk.regNo + ' ••••' + nk.last4 : '') + ' bekræftes mod en bankkilde. '
+          + 'Angiv kontoejerens navn præcis som banken oplyser det.</div>'
+          + '<div><div class="sm-label">Bankkilde *</div>'
+          + '<select class="sm-select" id="nk-source">'
+          + '<option value="psd2">Kontooplysningstjeneste (PSD2)</option>'
+          + '<option value="bank_statement">Kontoudtog fra leverandøren</option>'
+          + '<option value="bank_confirmation">Skriftlig bekræftelse fra banken</option>'
+          + '</select></div>'
+          + '<div><div class="sm-label">Kontoejer ifølge banken *</div>'
+          + '<input class="sm-input" id="nk-holder" placeholder="Virksomhedens navn på kontoen"/></div>'
+        : '<div style="font-size:11.5px;color:var(--text-50);line-height:1.6">'
+          + 'Kontonummeret gemmes ikke. ChainGuard beholder kun registreringsnummeret, '
+          + 'de sidste fire cifre og et hash, der gør det muligt at sammenligne konti.</div>'
+          + '<div style="display:grid;grid-template-columns:120px 1fr;gap:12px">'
+          + '<div><div class="sm-label">Reg.nr. *</div>'
+          + '<input class="sm-input" id="nk-reg" inputmode="numeric" maxlength="4" placeholder="0000"/></div>'
+          + '<div><div class="sm-label">Kontonummer *</div>'
+          + '<input class="sm-input" id="nk-acct" inputmode="numeric" maxlength="10" placeholder="0000000000"/></div>'
+          + '</div>'
+          + '<div><div class="sm-label">Kontotype</div>'
+          + '<select class="sm-select" id="nk-kind">'
+          + '<option value="nemkonto">NemKonto — virksomhedens udbetalingskonto</option>'
+          + '<option value="invoice">Fakturakonto — kontoen på leverandørens fakturaer</option>'
+          + '</select></div>'
+          + (nk && nk.last4
+              ? '<div style="font-size:11.5px;color:var(--amber);line-height:1.6">'
+                + 'Den nuværende konto ' + nk.regNo + ' ••••' + nk.last4
+                + ' lukkes og bliver stående i historikken, så ændringen kan ses.</div>'
+              : ''))
+    + '</div>'
+    + '<div class="sm-foot">'
+    + '<button class="btn btn-ghost" onclick="closeNemkontoModal()">Annullér</button>'
+    + '<button class="btn btn-primary" onclick="' + (verify ? 'submitNemkontoVerify()' : 'submitNemkonto()') + '">'
+    + (verify ? 'Bekræft konto' : 'Gem konto') + '</button>'
+    + '</div></div></div>');
+
+  setTimeout(function() {
+    var f = document.getElementById(verify ? 'nk-holder' : 'nk-reg');
+    if (f) f.focus();
+  }, 80);
+}
+
+function closeNemkontoModal() {
+  var el = document.getElementById('nk-modal-overlay');
+  if (el) el.remove();
+}
+
+function submitNemkonto() {
+  var reg  = (document.getElementById('nk-reg').value || '').trim();
+  var acct = (document.getElementById('nk-acct').value || '').trim();
+  var kind = document.getElementById('nk-kind').value;
+
+  fetch('/api/suppliers/' + _nkSupplierId + '/nemkonto', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ regNo: reg, accountNo: acct, kind: kind }),
+  })
+    .then(function(r) { return r.json().then(function(b) { return { ok: r.ok, body: b }; }); })
+    .then(function(res) {
+      if (!res.ok) { showToast('Kontoen blev ikke gemt', res.body.error || 'Prøv igen.', 'red'); return; }
+      closeNemkontoModal();
+      showToast('Konto registreret',
+        res.body.replaced ? 'Den tidligere konto er lukket og står i historikken.'
+                          : 'Kontoen skal verificeres mod en bankkilde, før den tæller som bekræftet.', 'green');
+      runComplianceCheck();
+    })
+    .catch(function() { showToast('Ingen forbindelse', 'Kontoen kunne ikke gemmes.', 'red'); });
+}
+
+function submitNemkontoVerify() {
+  var source = document.getElementById('nk-source').value;
+  var holder = (document.getElementById('nk-holder').value || '').trim();
+
+  fetch('/api/suppliers/' + _nkSupplierId + '/nemkonto/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: source, holderName: holder }),
+  })
+    .then(function(r) { return r.json().then(function(b) { return { ok: r.ok, body: b }; }); })
+    .then(function(res) {
+      if (!res.ok) { showToast('Kontoen blev ikke verificeret', res.body.error || 'Prøv igen.', 'red'); return; }
+      closeNemkontoModal();
+      var nk = res.body.nemkonto || {};
+      showToast('Konto verificeret',
+        nk.status === 'red' ? 'Kontrollen fandt kritiske afvigelser — se fundene under tabellen.'
+                            : 'Kontoen er bekræftet mod bankkilden.',
+        nk.status === 'red' ? 'red' : 'green');
+      runComplianceCheck();
+    })
+    .catch(function() { showToast('Ingen forbindelse', 'Kontoen kunne ikke verificeres.', 'red'); });
 }
 
 // ── AUTH ─────────────────────────────────────────────────────────
